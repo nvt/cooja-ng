@@ -2704,8 +2704,9 @@ int arm_step(arm_cpu_t *cpu, int count) {
          * from when chasing wild-PC bugs.  Set ARM_LR_WATCH=<value>
          * (e.g. 0x20003bb9) — checks against `value` and `value^1`
          * (with/without thumb bit).  One-shot per-CPU. */
-        if (getenv("ARM_LR_WATCH") && !cpu->lr_trapped) {
-            uint32_t want = (uint32_t)strtoul(getenv("ARM_LR_WATCH"), NULL, 0);
+        const char *lr_watch_env = cpu->lr_trapped ? NULL : getenv("ARM_LR_WATCH");
+        if (lr_watch_env) {
+            uint32_t want = (uint32_t)strtoul(lr_watch_env, NULL, 0);
             uint32_t lr = cpu->reg[ARM_LR];
             if (lr == want || lr == (want ^ 1u)) {
                 cpu->lr_trapped = 1;
