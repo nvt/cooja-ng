@@ -143,14 +143,13 @@ static const uint32_t dco_freq_high[8] = {
 static uint32_t cs_get_source_freq(const msp430_clock_t *clk, int sel) {
     uint16_t csctl4 = clk->csctl[CS_CSCTL4];
     bool lfxt_off = (csctl4 & CS_LFXTOFF) != 0;
-    bool hfxt_off = (csctl4 & CS_HFXTOFF) != 0;
     switch (sel) {
     case 0: return lfxt_off ? VLOCLK_FRQ : LFXTCLK_FRQ;
     case 1: return VLOCLK_FRQ;
     case 2: return LFMODCLK_FRQ;
     case 3: return clk->dco_freq;
     case 4: return MODCLK_FRQ;
-    case 5: return hfxt_off ? clk->dco_freq : clk->dco_freq;  /* HFXT not modeled; use DCO */
+    case 5: return clk->dco_freq;  /* HFXT not modeled; fall back to DCO */
     default: return clk->dco_freq;
     }
 }
