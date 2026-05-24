@@ -1747,7 +1747,6 @@ int arm_step(arm_cpu_t *cpu, int count) {
                 cpu->cycles += 1;
             } else if (op1 == 1 && (op2_5 & 0x64) == 0x04) {
                 /* Load/store dual, exclusive, table branch */
-                int op2_2 = (hw1 >> 4) & 3;
                 int rn = hw1 & 0xF;
                 int rt = (hw2 >> 12) & 0xF;
                 int rt2 = (hw2 >> 8) & 0xF;
@@ -1980,7 +1979,6 @@ int arm_step(arm_cpu_t *cpu, int count) {
                         break;
                     }
                     default:
-                        result = 0;
                         break;
                 }
                 if (rd == ARM_PC) cpu->reg[ARM_PC] &= ~1u;
@@ -2080,7 +2078,6 @@ int arm_step(arm_cpu_t *cpu, int count) {
                         break;
                     }
                     default:
-                        result = 0;
                         break;
                 }
             } else if (op1 == 2 && (op2_5 & 0x20) == 0x20 && !op_hw2) {

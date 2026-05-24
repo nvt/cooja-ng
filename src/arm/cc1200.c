@@ -921,7 +921,6 @@ uint8_t cc1200_spi_exchange(cc1200_t *c, uint8_t mosi) {
 
     c->stat_spi_xfers++;
     refresh_status(c);
-    uint8_t miso = c->status;
 
     switch (c->spi_state) {
     case CC1200_SPI_WAITING: {
@@ -967,7 +966,7 @@ uint8_t cc1200_spi_exchange(cc1200_t *c, uint8_t mosi) {
 
     case CC1200_SPI_REG_RW: {
         if (c->spi_is_read) {
-            miso = reg_read(c, c->spi_addr);
+            uint8_t miso = reg_read(c, c->spi_addr);
             if (c->spi_is_burst) {
                 c->spi_addr++;
             }

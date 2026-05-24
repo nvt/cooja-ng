@@ -973,8 +973,7 @@ static int msp430_step_interpreter(msp430_cpu_t *cpu, int count) {
         /* Interrupt processing (BEFORE instruction, matching MSPSim line 913) */
         if (cpu->interrupts_enabled && cpu->serviced_interrupt == -1
                 && cpu->interrupt_max >= 0) {
-            int pc = reg[MSP430_PC];
-            pc = service_interrupt(cpu, pc);
+            service_interrupt(cpu, reg[MSP430_PC]);
             /* If interrupt entry pushed us past cycle_limit, stop.
              * This prevents overshoot when LPM wake → event → ISR
              * happens within a single step iteration. */
@@ -1758,7 +1757,6 @@ static int msp430_step_interpreter(msp430_cpu_t *cpu, int count) {
             uint32_t mask = is_addr_mode ? 0xfffff : (bw ? 0xff : 0xffff);
             uint32_t msb_bit = is_addr_mode ? 0x80000 : (bw ? 0x80 : 0x8000);
             int mode_bytes = is_addr_mode ? 4 : (bw ? 1 : 2);
-            int mem_mode = is_addr_mode ? 2 : (bw ? 0 : 1);  /* for mem_read_mode */
             bool dst_reg_mode = (ad == 0);
 
             int src = 0;

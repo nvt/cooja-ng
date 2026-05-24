@@ -564,6 +564,6 @@ const char *pkt_summary(const uint8_t *data, int len, pkt_info_t *info) {
         p += n; remain -= n;
     }
 
-    (void)remain;
+    (void)p; (void)remain;
     return info->summary;
 }

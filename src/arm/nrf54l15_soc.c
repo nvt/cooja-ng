@@ -1745,7 +1745,7 @@ static void nrf54l_timer_write(void *user_data, uint32_t addr, uint32_t value) {
     nrf54l_timer_state_t *t = (nrf54l_timer_state_t *)user_data;
     uint32_t off = addr & 0xFFFu;
     if (getenv("NRF54L_TIMER_TRACE")) {
-        const char *kind = "?";
+        const char *kind;
         if (off < 0x80) kind = "TASK";
         else if (off >= 0x140 && off < 0x180) kind = "EVENTS_COMPARE";
         else if (off >= 0x540 && off < 0x560) kind = "CC";
