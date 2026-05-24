@@ -37,7 +37,7 @@ char *sim_state_to_json(const sim_node_info_t *nodes, int node_count,
 
     /* Simulation time in ms */
     cJSON_AddNumberToObject(root, "sim_time_ms",
-                            (double)(stats->sim_time_ns / MS_TO_NS));
+                            (double)stats->sim_time_ns / MS_TO_NS);
 
     /* Nodes array — full info */
     cJSON *jarr = cJSON_CreateArray();
@@ -52,7 +52,7 @@ char *sim_state_to_json(const sim_node_info_t *nodes, int node_count,
 
         if (nodes[i].last_tx_ns > 0)
             cJSON_AddNumberToObject(jnode, "last_tx_ms",
-                                    (double)(nodes[i].last_tx_ns / MS_TO_NS));
+                                    (double)nodes[i].last_tx_ns / MS_TO_NS);
 
         /* Console lines */
         cJSON *jcons = cJSON_CreateArray();
@@ -130,7 +130,7 @@ char *sim_state_delta_json(const sim_stats_t *stats,
 
     cJSON_AddStringToObject(root, "type", "delta");
     cJSON_AddNumberToObject(root, "sim_time_ms",
-                            (double)(stats->sim_time_ns / MS_TO_NS));
+                            (double)stats->sim_time_ns / MS_TO_NS);
 
     /* Stats — always included (small, always changing) */
     cJSON *jstats = cJSON_CreateObject();
@@ -161,7 +161,7 @@ char *sim_state_delta_json(const sim_stats_t *stats,
         /* Last TX time for communication arrows */
         if (node_last_tx_ns && node_last_tx_ns[i] > 0)
             cJSON_AddNumberToObject(jn, "last_tx_ms",
-                                    (double)(node_last_tx_ns[i] / MS_TO_NS));
+                                    (double)node_last_tx_ns[i] / MS_TO_NS);
         /* Console: only include if there are new lines */
         if (console_counts && console_counts[i] > 0 && console_lines) {
             cJSON *jcons = cJSON_CreateArray();
