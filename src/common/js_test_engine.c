@@ -81,7 +81,6 @@ static char *preprocess_script(const char *script) {
             }
             memcpy(out + out_len, pos, rest);
             out_len += rest;
-            out[out_len] = '\0';
             break;
         }
 

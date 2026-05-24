@@ -1449,7 +1449,7 @@ static void nrf54l_radio_write(void *user_data, uint32_t addr, uint32_t value) {
                 "BCSTART","BCSTOP","EDSTART","EDSTOP","CCASTART","CCASTOP"
             };
             fprintf(stderr, "[radio SUBSCRIBE_%s = ch%d cyc=%lld]\n",
-                    idx < 12 ? names[idx] : "?", value & 0x1F,
+                    idx < 12 ? names[idx] : "?", (int)(value & 0x1F),
                     (long long)r->plat->cpu.cycles);
         }
         r->subscribe[idx] = value;
