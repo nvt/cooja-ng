@@ -43,6 +43,17 @@ static const char *find_close_paren(const char *start, const char **comma_out) {
     return NULL;
 }
 
+/* Ensure `*out` has room for `need` bytes; on OOM, frees and returns 0. */
+static int grow_to(char **out, size_t *cap, size_t need) {
+    if (need < *cap) return 1;
+    size_t new_cap = need * 2 + 1;
+    char *tmp = realloc(*out, new_cap);
+    if (!tmp) { free(*out); *out = NULL; return 0; }
+    *out = tmp;
+    *cap = new_cap;
+    return 1;
+}
+
 static char *preprocess_script(const char *script) {
     /* We need to transform:
      * 1. TIMEOUT(ms, callback) → TIMEOUT(ms); var __timeout_cb = function() { callback };
@@ -73,12 +84,7 @@ static char *preprocess_script(const char *script) {
         if (!match) {
             /* No more macros — copy rest */
             size_t rest = strlen(pos);
-            if (out_len + rest >= cap) {
-                cap = out_len + rest + 1;
-                char *tmp = realloc(out, cap);
-                if (!tmp) { free(out); return strdup(script); }
-                out = tmp;
-            }
+            if (!grow_to(&out, &cap, out_len + rest)) return strdup(script);
             memcpy(out + out_len, pos, rest);
             out_len += rest;
             break;
@@ -86,12 +92,7 @@ static char *preprocess_script(const char *script) {
 
         /* Copy text before the match */
         size_t prefix = (size_t)(match - pos);
-        if (out_len + prefix >= cap) {
-            cap = (out_len + prefix) * 2;
-            char *tmp = realloc(out, cap);
-            if (!tmp) { free(out); return strdup(script); }
-            out = tmp;
-        }
+        if (!grow_to(&out, &cap, out_len + prefix)) return strdup(script);
         memcpy(out + out_len, pos, prefix);
         out_len += prefix;
 
@@ -111,24 +112,14 @@ static char *preprocess_script(const char *script) {
                 while (*cb == ' ') cb++;
                 size_t cb_len = (size_t)(close - cb);
                 size_t need = 60 + ms_len + cb_len;
-                if (out_len + need >= cap) {
-                    cap = (out_len + need) * 2;
-                    char *tmp = realloc(out, cap);
-                    if (!tmp) { free(out); return strdup(script); }
-                    out = tmp;
-                }
+                if (!grow_to(&out, &cap, out_len + need)) return strdup(script);
                 out_len += (size_t)snprintf(out + out_len, cap - out_len,
                     "TIMEOUT(%.*s);\nvar __timeout_cb = function() { %.*s };",
                     (int)ms_len, args, (int)cb_len, cb);
             } else {
                 /* TIMEOUT(ms) — copy as-is */
                 size_t span = (size_t)(close - match + 1);
-                if (out_len + span >= cap) {
-                    cap = (out_len + span) * 2;
-                    char *tmp = realloc(out, cap);
-                    if (!tmp) { free(out); return strdup(script); }
-                    out = tmp;
-                }
+                if (!grow_to(&out, &cap, out_len + span)) return strdup(script);
                 memcpy(out + out_len, match, span);
                 out_len += span;
             }
@@ -146,12 +137,7 @@ static char *preprocess_script(const char *script) {
             size_t expr_len = (size_t)(close - args);
             /* Escape any quotes in the expression */
             size_t need = 20 + expr_len * 2;
-            if (out_len + need >= cap) {
-                cap = (out_len + need) * 2;
-                char *tmp = realloc(out, cap);
-                if (!tmp) { free(out); return strdup(script); }
-                out = tmp;
-            }
+            if (!grow_to(&out, &cap, out_len + need)) return strdup(script);
             out_len += (size_t)snprintf(out + out_len, cap - out_len, "WAIT_UNTIL(\"");
             for (const char *e = args; e < close; e++) {
                 if (*e == '"') { out[out_len++] = '\\'; out[out_len++] = '"'; }
