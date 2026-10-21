@@ -47,9 +47,11 @@ int run_config_convert(int argc, char **argv) {
     }
     sim_normalized_config_t cfg;
     if (sim_config_load(&cfg, argv[0]) != 0) return 1;
-    char header[512];
-    if (argc == 3) snprintf(header, sizeof(header), "%s", argv[2]);
-    else snprintf(header, sizeof(header), "converted from %s by cooja-ng %s", argv[0], CSIM_VERSION);
+    /* A given header is passed through whole: the config editor carries a
+     * file's leading comment block in it, which can run to many lines. */
+    char made[512];
+    snprintf(made, sizeof(made), "converted from %s by cooja-ng %s", argv[0], CSIM_VERSION);
+    const char *header = argc == 3 ? argv[2] : made;
     int rc;
     if (strcmp(argv[1], "-") == 0) {          /* stdout: for tools that pipe it */
         rc = sim_config_write_yaml(&cfg, stdout, header);

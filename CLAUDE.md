@@ -713,6 +713,8 @@ CSIM_PC_TRACE=1           # MSP430 PC-trace counters (firmware cc2420_transmit /
                           # tsch_queue_add_packet, resolved per image) in the end-of-run stats.
                           # Off by default: the per-instruction callback is skipped (the interpreter
                           # still tests the hook pointer), and the count is a firmware property
+CSIM_LINE_BUFFERED=1      # line-buffer stdout on a pipe, for a tool streaming a run's output
+                          # (the config editor sets it); --shell/--script already do this
 NRF54L_UART_RX_TRACE=1    # nRF54L15 console bytes delivered into the firmware's receive buffer
 ARM_TZ_TRACE=1            # log every world transition (SG / BLXNS / BXNS /
                           # FNC_RETURN / cross-domain exception) with ns time

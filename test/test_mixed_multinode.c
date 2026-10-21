@@ -2334,9 +2334,12 @@ int run_mixed_multinode_test(int argc, char **argv) {
         return SHELL_EXIT_INVALID;
     }
     /* Shell or script through a pipe: make command echo, prompts and
-     * script output visible promptly.  Here, before anything has been
-     * written to stdout — setvbuf after the first output is undefined. */
-    if ((shell_enabled || script_path) && !isatty(STDOUT_FILENO))
+     * script output visible promptly.  CSIM_LINE_BUFFERED asks the same
+     * for any run, for a tool streaming the output as it comes
+     * (tools/config-editor.py).  Here, before anything has been written
+     * to stdout — setvbuf after the first output is undefined. */
+    if (((shell_enabled || script_path) && !isatty(STDOUT_FILENO)) ||
+        getenv("CSIM_LINE_BUFFERED"))
         setvbuf(stdout, NULL, _IOLBF, 0);
 
     g_live_config = &config;
