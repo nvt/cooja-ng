@@ -66,7 +66,7 @@ static int parse_node_peripherals(cJSON *node_item, sim_node_config_t *n, int id
     return 0;
 }
 
-static void parse_medium_object(cJSON *medium, sim_normalized_config_t *cfg);
+static int parse_medium_object(cJSON *medium, sim_normalized_config_t *cfg);
 static void parse_description(cJSON *root, sim_normalized_config_t *cfg);
 static int  parse_test(cJSON *test, sim_normalized_config_t *cfg);
 
@@ -197,7 +197,8 @@ static int parse_v1(cJSON *root, sim_normalized_config_t *cfg) {
     }
 
     /* Parse optional radiomedium object */
-    parse_medium_object(cJSON_GetObjectItemCaseSensitive(root, "radiomedium"), cfg);
+    if (parse_medium_object(cJSON_GetObjectItemCaseSensitive(root, "radiomedium"), cfg) != 0)
+        return -1;
 
     /* Parse nodes array */
     cJSON *nodes = cJSON_GetObjectItemCaseSensitive(root, "nodes");
@@ -314,16 +315,19 @@ static void parse_description(cJSON *root, sim_normalized_config_t *cfg) {
 }
 
 /* Shared medium-object parser (v1 "radiomedium" / v2 "medium").  No-op when
- * `medium` is not an object. */
-static void parse_medium_object(cJSON *medium, sim_normalized_config_t *cfg) {
-    if (!cJSON_IsObject(medium)) return;
+ * `medium` is not an object.  A medium without a type is an error: the
+ * runner would take its no-medium default and ignore every range in it. */
+static int parse_medium_object(cJSON *medium, sim_normalized_config_t *cfg) {
+    if (!cJSON_IsObject(medium)) return 0;
     cJSON *mtype = cJSON_GetObjectItemCaseSensitive(medium, "type");
-    if (cJSON_IsString(mtype) && mtype->valuestring) {
-        snprintf(cfg->medium_name, sizeof(cfg->medium_name), "%s",
-                 mtype->valuestring);
-        if (strcmp(mtype->valuestring, "udgm") == 0)
-            cfg->medium_type = 1;  /* RADIO_MEDIUM_UDGM */
+    if (!cJSON_IsString(mtype) || !mtype->valuestring || !mtype->valuestring[0]) {
+        fprintf(stderr, "sim_config: medium has no 'type' (udgm, none, or a "
+                "plugin medium's name)\n");
+        return -1;
     }
+    snprintf(cfg->medium_name, sizeof(cfg->medium_name), "%s", mtype->valuestring);
+    if (strcmp(mtype->valuestring, "udgm") == 0)
+        cfg->medium_type = 1;  /* RADIO_MEDIUM_UDGM */
 
     cJSON *val;
     val = cJSON_GetObjectItemCaseSensitive(medium, "tx_range");
@@ -337,6 +341,7 @@ static void parse_medium_object(cJSON *medium, sim_normalized_config_t *cfg) {
 
     val = cJSON_GetObjectItemCaseSensitive(medium, "success_ratio_rx");
     if (cJSON_IsNumber(val)) cfg->success_ratio_rx = val->valuedouble;
+    return 0;
 }
 
 /* Shared test-section parser (v1 + v2 use the same "test" schema).  Sets
@@ -551,7 +556,8 @@ static int parse_v2(cJSON *root, sim_normalized_config_t *cfg) {
     if (cJSON_IsNumber(speed)) cfg->speed = speed->valuedouble;
 
     /* v2 uses the "medium" key (v1 used "radiomedium") */
-    parse_medium_object(cJSON_GetObjectItemCaseSensitive(root, "medium"), cfg);
+    if (parse_medium_object(cJSON_GetObjectItemCaseSensitive(root, "medium"), cfg) != 0)
+        return -1;
 
     /* Named mote types: {name, kind, cpu, soc, board, firmware}.  Captured
      * for Phase 8; Phase 7 reads only firmware (+ writes the legacy
@@ -585,6 +591,16 @@ static int parse_v2(cJSON *root, sim_normalized_config_t *cfg) {
             ti++;
         }
         cfg->mote_type_count = ti;
+        /* Nodes resolve a type by name, first match: a second type of the
+         * same name would never be used, and its nodes would silently run
+         * the first one's firmware. */
+        for (int i = 0; i < ti; i++)
+            for (int k = i + 1; k < ti; k++)
+                if (strcmp(cfg->mote_types[i].name, cfg->mote_types[k].name) == 0) {
+                    fprintf(stderr, "sim_config: mote types %d and %d are both named '%s'\n",
+                            i, k, cfg->mote_types[i].name);
+                    return -1;
+                }
     }
 
     /* Plugins list (captured in Phase 7; consumed by Phase 9 — .so paths are

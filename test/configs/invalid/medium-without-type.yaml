@@ -1,0 +1,11 @@
+# A medium with no type takes the runner's no-medium default, which would
+# ignore the range given here.
+version: 2
+title: medium without type
+timeout_ms: 1000
+medium:
+  tx_range: 30.0
+mote_types:
+  - { name: a, firmware: firmware/sky/udp-server.sky }
+nodes:
+  - { type: a, id: 1 }

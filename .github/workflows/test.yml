@@ -380,7 +380,7 @@ jobs:
       # anchor, "Norway" boolean, hex, second document, ... — is refused;
       # and a YAML twin simulates byte-identically to its JSON original.
       - name: Config round-trip (every config, JSON and YAML, through the writer)
-        run: ./build/test_runner config-roundtrip configs/*.json configs/*.yaml test/configs/yaml-features.yaml
+        run: ./build/test_runner config-roundtrip configs/*.json configs/*.yaml test/configs/yaml-features.yaml test/configs/test-section-empty.yaml
       - name: Config rejection (every invalid fixture must fail to load)
         run: ./build/test_runner config-reject test/configs/invalid/*
       - name: Config nesting cap (YAML and JSON agree at 1000 levels; 200000 refused, not a crash)

@@ -1,0 +1,10 @@
+# Two mote types with one name: nodes resolve the first, so the second
+# type's nodes would silently run the Sky image.
+version: 2
+title: duplicate mote type name
+timeout_ms: 1000
+mote_types:
+  - { name: client, firmware: firmware/sky/udp-client.sky }
+  - { name: client, firmware: firmware/cc2538dk/udp-client.cc2538dk }
+nodes:
+  - { type: client, id: 1 }

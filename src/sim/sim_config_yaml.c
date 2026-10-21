@@ -785,6 +785,14 @@ int sim_config_write_yaml(const sim_normalized_config_t *cfg, FILE *f,
 
     if (cfg->has_test) {
         const sim_test_config_t *t = &cfg->test;
+        /* A present-but-empty section must stay a mapping: a bare "test:"
+         * reads back as null, which the validator refuses. */
+        if (!t->description[0] && !cfg->js_script_path[0] && !cfg->js_script_inline &&
+            !t->timeout_is_success && !t->step_count && !t->fail_on_count &&
+            !t->validator_count && !t->action_count) {
+            fputs("\ntest: {}\n", f);
+            return ferror(f) ? -1 : 0;
+        }
         fputs("\ntest:\n", f);
         if (t->description[0]) { fputs("  description: ", f); put_str(f, t->description); fputc('\n', f); }
         if (cfg->js_script_path[0]) { fputs("  js_script: ", f); put_str(f, cfg->js_script_path); fputc('\n', f); }

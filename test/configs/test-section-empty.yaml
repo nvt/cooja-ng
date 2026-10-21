@@ -1,0 +1,11 @@
+# An empty test section ("test: {}") has to survive the YAML writer: it used
+# to be written as a bare "test:", which reads back as null and fails to
+# load.  CI runs config-roundtrip on this file.
+version: 2
+title: empty test section
+timeout_ms: 1000
+mote_types:
+  - { name: a, firmware: firmware/sky/udp-server.sky }
+nodes:
+  - { type: a, id: 1, x: 0.0, y: 0.0 }
+test: {}
