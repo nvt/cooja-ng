@@ -112,13 +112,24 @@ class Runner:
             return self.load(src)
 
     def render(self, tree, header):
-        """The tree -> (ok, canonical YAML, diagnostics)."""
+        """The tree -> (ok, canonical YAML, diagnostics).  The YAML is loaded
+        back before it is called valid: checking only the input would pass a
+        file the writer turns into one that does not load."""
         with tempfile.TemporaryDirectory(prefix="csim-editor-") as d:
             src = os.path.join(d, "config.json")
             with open(src, "w") as f:
                 json.dump(tree, f)
             rc, out, err = self.run(["config-convert", src, "-", header], d)
-            return rc == 0, out if rc == 0 else "", err
+            if rc:
+                return False, "", err
+            back = os.path.join(d, "written.yaml")
+            with open(back, "w") as f:
+                f.write(out)
+            rc, _, err = self.run(["config-to-json", back], d)
+            if rc:
+                return False, "", ("the YAML written for this config does not load back "
+                                   "(a bug in the simulator's writer):\n" + err)
+            return True, out, ""
 
 
 def inventory():

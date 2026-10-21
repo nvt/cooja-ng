@@ -208,6 +208,12 @@ jobs:
         # open from driving a run.
         run: python3 tools/check-ui-access.py
 
+      - name: Config editor check
+        # The editor's server (load / render / save through test_runner, its
+        # Host/Origin and path rules) and, where Node 22+ and Chrome exist,
+        # the page itself; the page half is skipped, not failed, without them.
+        run: python3 tools/check-config-editor.py
+
       - name: Cooja-suite firmware cache names
         # A test never runs firmware built from another directory: names are
         # per source directory + make args, only shipped (tracked) images are

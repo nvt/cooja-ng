@@ -105,6 +105,8 @@ python3 tools/config-editor.py [configs/x.yaml] --open     # browser config edit
                                          # offline HTML page; loading, validation and the YAML all go through
                                          # test_runner (above), so the editor cannot drift from the schema.
                                          # Comments in a loaded file are not kept
+python3 tools/check-config-editor.py                       # its server checks; plus the page in headless Chrome
+                                         # when Node 22+ and Chrome are installed (skipped otherwise)
 
 # Determinism gates. check-determinism.sh runs ONE simulation twice and diffs
 # the two runs (is a run reproducible? CI runs it). check-baseline.sh asks

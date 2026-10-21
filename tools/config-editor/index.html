@@ -212,6 +212,27 @@ function stem(path) {
   return i > 0 ? b.slice(0, i) : b;
 }
 function typeIndex(name) { return cfg.mote_types.findIndex((t) => t.name === name); }
+/* Types whose name the editor chose (from the firmware file name); picking
+ * another firmware renames them, a name the user typed is left alone. */
+let autoNamed = new WeakSet();
+/* The firmware's file name, made unique among the other types: the same
+ * stem on two boards (sky/udp-client.sky, cc2538dk/udp-client.cc2538dk)
+ * would otherwise give two types one name, and nodes resolve the first. */
+function uniqueTypeName(t, fw) {
+  const taken = new Set(cfg.mote_types.filter((o) => o !== t).map((o) => o.name));
+  const base = stem(fw) || 'type', ext = (fw.split('/').pop().split('.')[1] || '');
+  if (!taken.has(base)) return base;
+  if (ext && !taken.has(`${base}-${ext}`)) return `${base}-${ext}`;
+  let n = 2; while (taken.has(`${base}-${n}`)) n++;
+  return `${base}-${n}`;
+}
+/* The ranges the runner uses: the medium's, or with no medium section its
+ * built-in default (test_mixed_multinode.c: 50 m, 10 m for a single node). */
+function radioRanges() {
+  const m = cfg.medium;
+  if (!m) { const d = cfg.nodes.length > 1 ? 50 : 10; return { radio: true, tx: d, intf: 2 * d, dflt: true }; }
+  return { radio: m.type !== 'none', tx: m.tx_range ?? 50, intf: m.interference_range ?? 100, dflt: false };
+}
 function typeColor(name) { const i = typeIndex(name); return i < 0 ? css('--red') : PALETTE[i % PALETTE.length]; }
 function nextId() { return cfg.nodes.reduce((m, n) => Math.max(m, n.id || 0), 0) + 1; }
 function boardOf(fw) { const f = info.firmware.find((x) => x.path === fw); return f ? f.board : ''; }
@@ -281,7 +302,6 @@ function table(rows, cols, mk, addLabel) {
 /* ---------- Simulation pane ---------- */
 function renderSim() {
   const p = $('p-sim'); p.replaceChildren();
-  cfg.medium = cfg.medium || { type: 'udgm' };
   const m = cfg.medium;
   p.append(
     el('h2', {}, 'General'),
@@ -294,14 +314,25 @@ function renderSim() {
       field('Speed (× real time)', bind(cfg, 'speed', 'num', { placeholder: 'max' }))),
     el('div', { class: 'hint' }, 'The same seed gives a byte-identical run. Leave speed empty to run as fast as possible.'),
     el('h2', {}, 'Radio medium'),
-    el('div', { class: 'grid2' },
-      field('Type', bind(m, 'type', 'text', { list: 'dl-medium', structural: true })),
+    // Never added behind the user's back: a config without a medium runs
+    // the runner's default, which is not the same as an explicit udgm.
+    el('label', { class: 'chk' }, el('input', { type: 'checkbox', ...(m ? { checked: '' } : {}),
+      onchange: (e) => {
+        if (e.target.checked) cfg.medium = { type: 'udgm', tx_range: 50, interference_range: 100, success_ratio_tx: 1, success_ratio_rx: 1 };
+        else delete cfg.medium;
+        changed(true);
+      } }), 'Configure the radio medium'));
+  if (m) p.append(
+    el('div', { class: 'grid2', style: 'margin-top:8px' },
+      field('Type', bind(m, 'type', 'text', { list: 'dl-medium', structural: true, required: true })),
       el('span'),
       field('TX range (m)', bind(m, 'tx_range', 'num', { placeholder: '50' })),
       field('Interference range (m)', bind(m, 'interference_range', 'num', { placeholder: '100' })),
       field('Success ratio TX', bind(m, 'success_ratio_tx', 'num', { placeholder: '1.0' })),
       field('Success ratio RX', bind(m, 'success_ratio_rx', 'num', { placeholder: '1.0' }))),
     el('div', { class: 'hint' }, 'udgm is the unit-disk graph medium; a plugin medium (lossy, gilbert-elliott) also needs its .so under Plugins.'));
+  else p.append(el('div', { class: 'hint' },
+    'No medium section: the runner uses its default unit-disk medium (50 m TX, 100 m interference; 10 m for a single node).'));
 
   cfg.plugins = cfg.plugins || [];
   p.append(el('h2', {}, 'Plugins'));
@@ -328,9 +359,20 @@ function renderTypes() {
     'A mote type is a firmware image; nodes refer to it by name. The firmware extension selects the board.'));
   cfg.mote_types.forEach((t, i) => {
     const used = cfg.nodes.filter((n) => n.type === t.name).length;
-    const rename = (old, now) => { cfg.nodes.forEach((n) => { if (n.type === old) n.type = now; }); renderNodes(); fillTypeSelects(); };
+    const follow = (old, now) => cfg.nodes.forEach((n) => { if (n.type === old) n.type = now; });
+    const rename = (old, now) => {
+      if (!now || cfg.mote_types.some((o) => o !== t && o.name === now)) {
+        t.name = old;
+        toast(now ? `There is already a mote type named "${now}"` : 'A mote type needs a name');
+        return;
+      }
+      autoNamed.delete(t);
+      follow(old, now);
+    };
     const fw = bind(t, 'firmware', 'text', { list: 'dl-firmware', placeholder: 'firmware/sky/udp-server.sky', structural: true,
-      onset: (old, now) => { if (!t.name || t.name === stem(old) || /^type\d+$/.test(t.name)) { const o = t.name; t.name = stem(now); rename(o, t.name); } } });
+      onset: () => {
+        if (!t.name || autoNamed.has(t)) { const o = t.name; t.name = uniqueTypeName(t, t.firmware || ''); autoNamed.add(t); follow(o, t.name); }
+      } });
     p.append(el('div', { class: 'card' },
       el('div', { class: 'card-head' },
         el('span', { class: 'swatch', style: `background:${PALETTE[i % PALETTE.length]}` }),
@@ -352,7 +394,8 @@ function renderTypes() {
   });
   p.append(el('div', { class: 'row' }, el('button', { class: 'primary', onclick: () => {
     let n = 1; while (typeIndex('type' + n) >= 0) n++;
-    cfg.mote_types.push({ name: 'type' + n, firmware: '' }); changed(true);
+    const t = { name: 'type' + n, firmware: '' };
+    cfg.mote_types.push(t); autoNamed.add(t); changed(true);
     setTimeout(() => { const ins = $('p-types').querySelectorAll('input[list=dl-firmware]'); ins[ins.length - 2]?.focus(); }, 0);
   } }, '+ Mote type')));
 }
@@ -398,7 +441,7 @@ function addNode(type, x, y) {
   if (!type) { toast('Add a mote type first'); return; }
   if (x === undefined) {
     const last = cfg.nodes[cfg.nodes.length - 1];
-    x = last ? round1((last.x || 0) + (cfg.medium?.tx_range || 50) * 0.4) : 0; y = last ? (last.y || 0) : 0;
+    x = last ? round1((last.x || 0) + radioRanges().tx * 0.4) : 0; y = last ? (last.y || 0) : 0;
   }
   cfg.nodes.push({ type, id: nextId(), x, y });
   selected = cfg.nodes.length - 1;
@@ -491,7 +534,7 @@ let drag = null, autoFit = true;
 function fit() {
   const W = cv.clientWidth, H = cv.clientHeight;
   const pts = cfg.nodes.filter((n) => n.x !== undefined);
-  const r = cfg.medium?.tx_range || 50;
+  const r = radioRanges().tx || 50;
   let x0 = -r / 2, x1 = r / 2, y0 = -r / 2, y1 = r / 2;
   if (pts.length) {
     x0 = Math.min(...pts.map((n) => n.x)) - r * 0.35; x1 = Math.max(...pts.map((n) => n.x)) + r * 0.35;
@@ -523,8 +566,7 @@ function draw() {
   ctx.fillStyle = css('--dim'); ctx.font = '11px -apple-system, sans-serif';
   ctx.fillText(`grid ${step} m`, W - 70, H - 10);
 
-  const m = cfg.medium || {}, tx = m.tx_range ?? 50, intf = m.interference_range ?? 100;
-  const radio = (m.type || 'udgm') !== 'none';
+  const { radio, tx, intf, dflt } = radioRanges();
   const nodes = cfg.nodes.map((n, i) => ({ n, i, x: n.x || 0, y: n.y || 0 }));
   // links within TX range
   if (radio) {
@@ -562,7 +604,7 @@ function draw() {
   ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
   const legend = cfg.mote_types.map((t, i) => `<span class="swatch" style="background:${PALETTE[i % PALETTE.length]}"></span>${esc(t.name)}`).join(' &nbsp; ');
   $('legend').innerHTML = (legend ? legend + ' &nbsp;·&nbsp; ' : '') +
-    (radio ? `solid ring = TX range ${tx} m, dashed = interference ${intf} m · ` : '') + 'double-click to add · drag to move';
+    (radio ? `solid ring = TX range ${tx} m, dashed = interference ${intf} m${dflt ? ' (runner default)' : ''} · ` : '') + 'double-click to add · drag to move';
 }
 function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 function hit(px, py) {
@@ -612,7 +654,7 @@ window.addEventListener('keydown', (e) => {
 function openGen() {
   if (!cfg.mote_types.length) { toast('Add a mote type first'); showTab('types'); return; }
   fillTypeSelects();
-  $('g-spacing').value = round1((cfg.medium?.tx_range || 50) * 0.8);
+  $('g-spacing').value = round1((radioRanges().tx || 50) * 0.8);
   $('gen').showModal();
 }
 $('b-gen').onclick = openGen;
@@ -682,6 +724,11 @@ function load(tree, path) {
   cfg = tree;
   if (cfg.version !== 2) cfg.version = 2;
   cfg.mote_types = cfg.mote_types || []; cfg.nodes = cfg.nodes || [];
+  // names the writer synthesized from the firmware count as the editor's
+  autoNamed = new WeakSet(cfg.mote_types.filter((t) => {
+    const b = stem(t.firmware), ext = (t.firmware || '').split('/').pop().split('.')[1];
+    return t.name === b || t.name === `${b}-${ext}`;
+  }));
   selected = -1; autoFit = true; dirty = false; $('dirty').textContent = '';
   $('save-path').value = path || `configs/${slug(cfg.title)}.yaml`;
   renderForms(); draw(); renderYaml();
