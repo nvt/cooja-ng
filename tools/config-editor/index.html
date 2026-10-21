@@ -81,6 +81,22 @@ details summary { cursor:pointer; color:var(--muted); font-size:11px; margin-top
 .pill.ok { background:#3fb95026; color:var(--green); }
 .pill.bad { background:#f8514926; color:var(--red); }
 .pill.wait { background:var(--btn); color:var(--muted); }
+.pill.warn { background:#d2992226; color:var(--yellow); }
+.otabs { display:flex; }
+.otabs button { border-radius:0; border-right-width:0; padding:3px 10px; }
+.otabs button:first-child { border-radius:5px 0 0 5px; }
+.otabs button:last-child { border-radius:0 5px 5px 0; border-right-width:1px; }
+.otabs button.active { color:var(--accent); border-color:var(--accent); border-right-width:1px; }
+button:disabled { opacity:.45; cursor:default; }
+#note { color:var(--yellow); }
+#warnings { color:var(--yellow); padding:5px 14px; border-bottom:1px solid var(--border); font-size:12px; }
+#warnings:empty, #warnings[hidden] { display:none; }
+#run { flex:1; display:flex; flex-direction:column; min-height:0; }
+#run[hidden] { display:none; }
+#run-status { padding:6px 14px; border-bottom:1px solid var(--border); color:var(--muted); }
+#run-status.pass { color:var(--green); } #run-status.fail { color:var(--red); }
+#run-out { flex:1; overflow:auto; padding:8px 14px; white-space:pre-wrap; word-break:break-all; }
+.fw-hint.missing { color:var(--yellow); }
 pre#yaml { flex:1; overflow:auto; padding:10px 14px; white-space:pre; color:var(--text); }
 pre#yaml.err { color:var(--red); white-space:pre-wrap; }
 #cmd { color:var(--muted); font-size:11px; padding:0 14px 6px; }
@@ -106,6 +122,8 @@ dialog h3 { font-size:14px; margin-bottom:10px; }
   <select id="b-open" style="width:auto;max-width:260px"><option value="">Open from configs/…</option></select>
   <button id="b-upload">Open file…</button>
   <input type="file" id="f-upload" accept=".yaml,.yml,.json" hidden>
+  <button id="b-undo" title="Undo (Ctrl/⌘-Z)" disabled>Undo</button>
+  <button id="b-redo" title="Redo (Ctrl-Y / ⇧⌘-Z)" disabled>Redo</button>
   <span class="grow"></span>
   <span id="dirty" class="hint"></span>
   <button id="b-theme">Light</button>
@@ -137,14 +155,21 @@ dialog h3 { font-size:14px; margin-bottom:10px; }
     </div>
     <div class="out">
       <div class="out-head">
+        <span class="otabs"><button data-out="yaml" class="active">YAML</button><button data-out="run">Run</button></span>
         <span id="status" class="pill wait">…</span>
+        <span id="note" class="hint"></span>
         <span class="grow" style="flex:1"></span>
         <input id="save-path" placeholder="configs/my-sim.yaml" spellcheck="false">
-        <button id="b-save" class="primary">Save</button>
+        <button id="b-save" class="primary" title="Save (Ctrl/⌘-S)">Save</button>
+        <button id="b-run" title="Save, then run it">Run</button>
+        <button id="b-run-ui" title="Save, then run it in the simulator's live web UI (paced at 10× real time)">Run with live view</button>
+        <button id="b-stop" class="danger" hidden>Stop</button>
         <button id="b-download">Download</button>
         <button id="b-copy">Copy</button>
       </div>
+      <div id="warnings"></div>
       <pre id="yaml"></pre>
+      <div id="run" hidden><div id="run-status" class="mono">No run yet.</div><pre id="run-out"></pre></div>
       <div id="cmd" class="mono"></div>
     </div>
   </div>
@@ -174,7 +199,6 @@ dialog h3 { font-size:14px; margin-bottom:10px; }
 <script>
 'use strict';
 const $ = (id) => document.getElementById(id);
-const HEADER = 'written by tools/config-editor.py';
 const PALETTE = ['#58a6ff', '#3fb950', '#d29922', '#f778ba', '#a371f7', '#ff9f43', '#39c5cf', '#f85149'];
 
 let cfg = null;            // the v2 tree being edited
@@ -183,6 +207,11 @@ let server = true;         // false when the page was opened without the server
 let lastYaml = '';
 let selected = -1;         // selected node index
 let dirty = false;
+let meta = { header: '' };  // the comment written at the top of the file; not part of the tree
+let lostComments = 0;      // comments inside the loaded file that saving drops
+let commentsAcked = false; // ...and the user has said that is fine
+let ownPath = '';          // the file this config was loaded from or last saved to
+let missing = new Set();   // paths in the config that do not exist (server says)
 
 /* ---------- theme ---------- */
 function setTheme(t) {
@@ -215,6 +244,12 @@ function typeIndex(name) { return cfg.mote_types.findIndex((t) => t.name === nam
 /* Types whose name the editor chose (from the firmware file name); picking
  * another firmware renames them, a name the user typed is left alone. */
 let autoNamed = new WeakSet();
+function markAutoNamed() {   // names the writer synthesized from the firmware count as the editor's
+  autoNamed = new WeakSet(cfg.mote_types.filter((t) => {
+    const b = stem(t.firmware), ext = (t.firmware || '').split('/').pop().split('.')[1];
+    return t.name === b || t.name === `${b}-${ext}`;
+  }));
+}
 /* The firmware's file name, made unique among the other types: the same
  * stem on two boards (sky/udp-client.sky, cc2538dk/udp-client.cc2538dk)
  * would otherwise give two types one name, and nodes resolve the first. */
@@ -238,9 +273,48 @@ function nextId() { return cfg.nodes.reduce((m, n) => Math.max(m, n.id || 0), 0)
 function boardOf(fw) { const f = info.firmware.find((x) => x.path === fw); return f ? f.board : ''; }
 function round1(v) { return Math.round(v * 10) / 10; }
 
-function changed(structural) {
-  dirty = true;
-  $('dirty').textContent = 'unsaved changes';
+/* Undo history: whole-config snapshots.  Keystrokes in one field within a
+ * second of each other are one step, so undo does not go letter by letter;
+ * a drag is one step (recorded on mouse-up). */
+let undoStack = [], redoStack = [], current = '', savedState = '', lastSource = null, lastTime = 0;
+const snapshot = () => JSON.stringify({ cfg, header: meta.header });
+function record(source) {
+  const now = snapshot();
+  if (now === current) return;
+  const t = Date.now();
+  if (!(source && source === lastSource && t - lastTime < 1000)) {
+    undoStack.push(current);
+    if (undoStack.length > 200) undoStack.shift();
+  }
+  redoStack = []; current = now; lastSource = source; lastTime = t;
+  updateHistory();
+}
+function resetHistory() {
+  undoStack = []; redoStack = []; current = savedState = snapshot(); lastSource = null;
+  updateHistory();
+}
+function updateHistory() {
+  $('b-undo').disabled = !undoStack.length;
+  $('b-redo').disabled = !redoStack.length;
+  dirty = current !== savedState;
+  $('dirty').textContent = dirty ? 'unsaved changes' : '';
+}
+function restore(from, to) {
+  if (!from.length) return;
+  to.push(current);
+  current = from.pop();
+  const st = JSON.parse(current);
+  cfg = st.cfg; meta.header = st.header;
+  markAutoNamed();
+  if (selected >= cfg.nodes.length) selected = -1;
+  lastSource = null;
+  updateHistory(); renderForms(); draw(); scheduleRender();
+}
+$('b-undo').onclick = () => restore(undoStack, redoStack);
+$('b-redo').onclick = () => restore(redoStack, undoStack);
+
+function changed(structural, source) {
+  record(source);
   if (structural) renderForms();
   updateCounts();
   draw();
@@ -280,7 +354,7 @@ function bind(obj, key, kind, opts = {}) {
     else if (kind === 'num' || kind === 'int') { const n = Number(v); if (Number.isFinite(n)) obj[key] = kind === 'int' ? Math.trunc(n) : n; }
     else obj[key] = v;
     if (opts.onset) opts.onset(old, obj[key]);
-    changed(opts.structural);
+    changed(opts.structural, e);
   };
   e.addEventListener(opts.structural ? 'change' : 'input', apply);
   return e;
@@ -308,6 +382,7 @@ function renderSim() {
     el('div', { class: 'grid2' },
       field('Title', bind(cfg, 'title', 'text'), 'wide'),
       field('Description', bind(cfg, 'description', 'area', { rows: 2 }), 'wide'),
+      field('Comment at the top of the file', bind(meta, 'header', 'area', { rows: 3 }), 'wide'),
       field('Duration (timeout_ms)', bind(cfg, 'timeout_ms', 'int', { placeholder: '20000' })),
       field('Random seed', bind(cfg, 'seed', 'int', { placeholder: 'none' })),
       field('Startup delay (ms)', bind(cfg, 'startup_delay_ms', 'int', { placeholder: '0' })),
@@ -338,8 +413,8 @@ function renderSim() {
   p.append(el('h2', {}, 'Plugins'));
   if (cfg.plugins.length)
     p.append(table(cfg.plugins, ['Built-in name or .so path'], (_, i) => [
-      (() => { const o = { v: cfg.plugins[i] }; const e = bind(o, 'v', 'text', { list: 'dl-plugins' });
-               e.addEventListener('input', () => { cfg.plugins[i] = o.v || ''; }); return e; })()]));
+      (() => { const o = { v: cfg.plugins[i] };
+               return bind(o, 'v', 'text', { list: 'dl-plugins', onset: () => { cfg.plugins[i] = o.v || ''; } }); })()]));
   p.append(el('div', { class: 'row' }, el('button', { onclick: () => { cfg.plugins.push(''); changed(true); } }, '+ Plugin')));
 
   p.append(el('h2', {}, 'Serial socket'));
@@ -383,7 +458,7 @@ function renderTypes() {
           if (used && !confirm(`Remove "${t.name}" and its ${used} node(s)?`)) return;
           cfg.nodes = cfg.nodes.filter((n) => n.type !== t.name); cfg.mote_types.splice(i, 1); changed(true); } }, '×')),
       field('Firmware', fw),
-      el('div', { class: 'hint' }, boardOf(t.firmware) || (t.firmware ? 'not found under firmware/ (fine if it is built elsewhere)' : '')),
+      el('div', { class: 'hint fw-hint', 'data-fw': t.firmware || '' }),
       el('details', {}, el('summary', {}, 'TrustZone / descriptive fields'),
         el('div', { class: 'grid2', style: 'margin-top:6px' },
           field('Secure-world firmware (nRF54L15)', bind(t, 'secure_firmware', 'text', { list: 'dl-firmware' }), 'wide'),
@@ -392,6 +467,7 @@ function renderTypes() {
           field('soc', bind(t, 'soc', 'text', { placeholder: 'msp430f1611' })),
           field('board', bind(t, 'board', 'text', { placeholder: 'sky' }))))));
   });
+  updateFwHints();
   p.append(el('div', { class: 'row' }, el('button', { class: 'primary', onclick: () => {
     let n = 1; while (typeIndex('type' + n) >= 0) n++;
     const t = { name: 'type' + n, firmware: '' };
@@ -480,8 +556,8 @@ function renderTest() {
   t.fail_on = t.fail_on || [];
   p.append(el('h2', {}, 'Fail on — any match fails the run'),
     t.fail_on.length ? table(t.fail_on, ['pattern'], (_, i) => [(() => {
-      const o = { v: t.fail_on[i] }; const e = bind(o, 'v', 'text');
-      e.addEventListener('input', () => { t.fail_on[i] = o.v || ''; }); return e; })()]) : '',
+      const o = { v: t.fail_on[i] };
+      return bind(o, 'v', 'text', { onset: () => { t.fail_on[i] = o.v || ''; } }); })()]) : '',
     el('div', { class: 'row' }, el('button', { onclick: () => { t.fail_on.push(''); changed(true); } }, '+ Pattern')));
 
   t.actions = t.actions || [];
@@ -648,6 +724,12 @@ window.addEventListener('keydown', (e) => {
     cfg.nodes.splice(selected, 1); selected = -1; changed(true);
   }
   if ((e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); save(); }
+  // in a text field the browser's own undo applies
+  if ((e.metaKey || e.ctrlKey) && !e.target.closest('input, textarea, select')) {
+    const k = e.key.toLowerCase();
+    if (k === 'z' && !e.shiftKey) { e.preventDefault(); restore(undoStack, redoStack); }
+    else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); restore(redoStack, undoStack); }
+  }
 });
 
 /* ---------- layout generator ---------- */
@@ -698,11 +780,16 @@ async function renderYaml() {
   const seq = ++renderSeq;
   setStatus('wait', 'checking…');
   try {
-    const r = await api('/api/render', { config: outgoing(), header: HEADER });
+    const r = await api('/api/render', { config: outgoing(), header: meta.header });
     if (seq !== renderSeq) return;
+    missing = new Set(r.missing || []);
+    updateFwHints();
+    $('warnings').textContent = missing.size
+      ? `Not found: ${[...missing].join(', ')} — the run would fail when ${missing.size === 1 ? 'it is' : 'they are'} opened.` : '';
     if (r.ok) {
       lastYaml = r.yaml; $('yaml').className = ''; $('yaml').textContent = r.yaml;
-      setStatus('ok', 'valid — the simulator accepts this');
+      if (missing.size) setStatus('warn', `valid · ${missing.size} file${missing.size === 1 ? '' : 's'} not found`);
+      else setStatus('ok', 'valid — the simulator accepts this');
     } else {
       $('yaml').className = 'err'; $('yaml').textContent = r.errors;
       const n = (r.errors.match(/(\d+) config errors?/) || [])[1];
@@ -713,23 +800,33 @@ async function renderYaml() {
   }
   updateCmd();
 }
+function updateFwHints() {
+  for (const h of document.querySelectorAll('.fw-hint')) {
+    const fw = h.dataset.fw, gone = missing.has(fw);
+    h.classList.toggle('missing', gone);
+    h.textContent = gone ? 'file not found — the run would fail when this node boots' : boardOf(fw);
+  }
+}
 function setStatus(kind, text) { const s = $('status'); s.className = 'pill ' + kind; s.textContent = text; }
 function updateCmd() {
   const p = $('save-path').value || 'configs/….yaml';
-  $('cmd').textContent = `./build/test_runner test ${p}` + (cfg.test ? '' : '    # add --ui 8080 to watch it run');
+  $('cmd').textContent = `./build/test_runner test ${p}`;
 }
 function slug(s) { return (s || 'simulation').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 48) || 'simulation'; }
 
-function load(tree, path) {
+/* path: where Save goes; from: the file it came from, if saving there
+ * replaces it (a JSON original is not replaced by its YAML). */
+function load(tree, path, { header = '', comments = 0, from = '' } = {}) {
   cfg = tree;
   if (cfg.version !== 2) cfg.version = 2;
   cfg.mote_types = cfg.mote_types || []; cfg.nodes = cfg.nodes || [];
-  // names the writer synthesized from the firmware count as the editor's
-  autoNamed = new WeakSet(cfg.mote_types.filter((t) => {
-    const b = stem(t.firmware), ext = (t.firmware || '').split('/').pop().split('.')[1];
-    return t.name === b || t.name === `${b}-${ext}`;
-  }));
-  selected = -1; autoFit = true; dirty = false; $('dirty').textContent = '';
+  meta.header = header;
+  lostComments = comments; commentsAcked = false; ownPath = from;
+  $('note').textContent = comments
+    ? `${comments} comment${comments === 1 ? '' : 's'} inside the file will not be kept (the one at the top is)` : '';
+  markAutoNamed();
+  selected = -1; autoFit = true;
+  resetHistory();
   $('save-path').value = path || `configs/${slug(cfg.title)}.yaml`;
   renderForms(); draw(); renderYaml();
 }
@@ -746,8 +843,9 @@ $('b-open').onchange = async (e) => {
 async function openPath(path) {
   try {
     const r = await api('/api/load?path=' + encodeURIComponent(path));
-    const yamlPath = path.replace(/\.json$/, '.yaml');
-    load(r.config, yamlPath);
+    const json = path.endsWith('.json');
+    load(r.config, json ? path.replace(/\.json$/, '.yaml') : path,
+         { header: r.header, comments: r.comments, from: json ? '' : path });
     toast(path.endsWith('.json') ? `Loaded ${path} — saves as YAML` : `Loaded ${path}`);
   } catch (err) { alert(`${path} does not load:\n\n${err.message}`); }
 }
@@ -757,19 +855,32 @@ $('f-upload').onchange = async (e) => {
   if (!f || !confirmDiscard()) return;
   try {
     const text = await f.text();
-    const tree = server ? (await api('/api/parse', { text, name: f.name })).config : JSON.parse(text);
-    load(tree, 'configs/' + f.name.replace(/\.(json|yml)$/, '.yaml'));
+    const r = server ? await api('/api/parse', { text, name: f.name }) : { config: JSON.parse(text) };
+    load(r.config, 'configs/' + f.name.replace(/\.(json|yml)$/, '.yaml'), { header: r.header, comments: r.comments });
   } catch (err) { alert(`${f.name} does not load:\n\n${err.message}`); }
 };
+/* Saving over the file the config came from (or was last saved to) needs
+ * no confirmation, except the first time when that drops comments; any
+ * other existing file does.  Returns whether it was saved. */
 async function save(overwrite) {
   const path = $('save-path').value.trim();
-  if (!path) { $('save-path').focus(); return; }
+  if (!path) { $('save-path').focus(); return false; }
+  const own = path === ownPath;
+  if (own && lostComments && !commentsAcked) {
+    if (!confirm(`${path} has ${lostComments} comment${lostComments === 1 ? '' : 's'} inside it that saving will drop ` +
+                 '(the comment at the top is kept). Save anyway?')) return false;
+    commentsAcked = true;
+  }
+  const state = current;
   try {
-    const r = await api('/api/save', { path, config: outgoing(), header: HEADER, overwrite: !!overwrite });
-    dirty = false; $('dirty').textContent = ''; toast(`Saved ${r.saved}`); updateCmd(); refreshInfo();
+    const r = await api('/api/save', { path, config: outgoing(), header: meta.header, overwrite: !!overwrite || own });
+    ownPath = path; savedState = state; updateHistory();
+    toast(`Saved ${r.saved}`); updateCmd(); refreshInfo();
+    return true;
   } catch (e) {
     if (e.status === 409 && confirm(`${path} exists. Overwrite it?`)) return save(true);
     if (e.status !== 409) alert('Not saved:\n\n' + e.message);
+    return false;
   }
 }
 $('b-save').onclick = () => save();
@@ -783,6 +894,62 @@ $('b-download').onclick = () => {
 $('b-copy').onclick = async () => {
   try { await navigator.clipboard.writeText(lastYaml); toast('YAML copied'); } catch (e) { toast('Copy failed'); }
 };
+/* ---------- run ---------- */
+document.querySelectorAll('.otabs button').forEach((b) => b.onclick = () => showOut(b.dataset.out));
+function showOut(which) {
+  document.querySelectorAll('.otabs button').forEach((b) => b.classList.toggle('active', b.dataset.out === which));
+  $('yaml').hidden = $('warnings').hidden = which !== 'yaml';
+  $('run').hidden = which !== 'run';
+}
+let runSince = 0, runTimer = null, runWin = null, runHadTest;   // unknown for a run found on reload
+const EXIT = { 0: 'passed', 1: 'failed: a test assertion did not hold', 2: 'failed: invalid config or option',
+               5: 'failed: the firmware faulted', 6: 'failed: wall-clock timeout', 7: 'cancelled' };
+async function startRun(ui) {
+  // the window has to be opened inside the click, or it is a blocked popup
+  runWin = ui ? window.open('about:blank', '_blank') : null;
+  const fail = (msg) => { runWin?.close(); runWin = null; if (msg) alert(msg); };
+  clearTimeout(renderTimer);
+  await renderYaml();
+  if ($('status').classList.contains('bad')) return fail('Fix the errors first (see the YAML tab).');
+  if ((dirty || $('save-path').value.trim() !== ownPath) && !(await save())) return fail();
+  try {
+    await api('/api/run', { path: ownPath, ui });
+  } catch (e) { return fail('Not started:\n\n' + e.message); }
+  runSince = 0; runHadTest = !!cfg.test; $('run-out').textContent = '';
+  showOut('run'); pollRun();
+}
+async function pollRun() {
+  clearTimeout(runTimer);
+  let r;
+  try { r = await api('/api/run?since=' + runSince); } catch (e) { runTimer = setTimeout(pollRun, 1000); return; }
+  if (!r.id) return;
+  const out = $('run-out'), atEnd = out.scrollTop + out.clientHeight >= out.scrollHeight - 4;
+  if (r.lines.length) {
+    out.append(r.lines.join('\n') + '\n');
+    if (runWin && r.ui_url && r.lines.some((l) => l.includes('UI server listening'))) {
+      runWin.location = r.ui_url; runWin = null;
+    }
+  }
+  if (atEnd) out.scrollTop = out.scrollHeight;
+  runSince = r.next;
+  const st = $('run-status'), secs = r.elapsed.toFixed(1);
+  $('b-stop').hidden = !r.running;
+  $('b-run').disabled = $('b-run-ui').disabled = r.running;
+  if (r.running) {
+    st.className = 'mono'; st.textContent = `running ${r.path} … ${secs} s` + (r.ui_url ? ` — live view at ${r.ui_url}` : '');
+    runTimer = setTimeout(pollRun, 300);
+  } else {
+    const ok0 = runHadTest === undefined ? 'finished (exit 0)' : runHadTest ? 'passed' : 'completed (no test section)';
+    const what = r.stopped ? 'stopped' : r.exit === 0 ? ok0 : (EXIT[r.exit] || `failed (exit ${r.exit})`);
+    st.className = 'mono ' + (r.exit === 0 && !r.stopped ? 'pass' : 'fail');
+    st.textContent = `${r.path}: ${what} — ${secs} s wall clock` + (r.dropped ? ` (first ${r.dropped} lines not kept)` : '');
+    runWin?.close(); runWin = null;
+  }
+}
+$('b-run').onclick = () => startRun(false);
+$('b-run-ui').onclick = () => startRun(true);
+$('b-stop').onclick = async () => { try { await api('/api/run/stop', {}); } finally { pollRun(); } };
+
 window.addEventListener('beforeunload', (e) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
 
 let toastTimer;
@@ -812,6 +979,7 @@ async function refreshInfo() {
   load(blank(), '');
   const start = new URLSearchParams(location.search).get('config');
   if (start && server) { $('b-open').value = ''; await openPath(start); }
+  if (server) pollRun();   // a run started before a reload is still shown
 })();
 </script>
 </body>

@@ -19,13 +19,23 @@ does, asserting:
   - a request with a foreign Host (DNS rebinding) or Origin is refused;
   - a save outside the repository, or not to .yaml/.yml, is refused; an
     existing file is not overwritten unless asked; a saved file loads back
-    and renders to the same text.
+    and renders to the same text;
+  - a loaded file's leading comment block comes back as the header and is
+    written again (whole, even at 2000 characters), and the comments that
+    saving drops are counted -- not the writer's own, not a '#' in a quoted
+    string or a block scalar;
+  - a firmware path that does not exist is a warning, not an error;
+  - a bad Content-Length is a 400, not a dropped connection;
+  - a run reports its exit code (0 pass, 1 a failed validator), streams its
+    output while it runs, refuses a second run meanwhile, can be stopped,
+    and runs only an existing config inside the repository.
 
 Then, when Node 22+ (for its WebSocket) and Chrome or Chromium are
 installed, tools/config-editor/check-browser.mjs drives the page itself in
 headless Chrome: the unique type names, the medium that is never added
 behind the user's back, the empty test section, a medium cleared of its
-type, the layout generator and dragging a node.  Without them that part is
+type, the layout generator and dragging a node, undo/redo, the dropped-
+comments note, the missing-firmware warning and a run from the Run button.  Without them that part is
 skipped, not failed (CHROME=... names the browser).
 
 Usage: tools/check-config-editor.py        (RUNNER=... to override the binary)
@@ -108,9 +118,48 @@ class Editor:
     def render(self, config):
         return self.request('/api/render', {'config': config, 'header': 'check'})[1]
 
-    def save(self, path, config, overwrite=False):
+    def save(self, path, config, overwrite=False, header='check'):
         return self.request('/api/save', {'path': path, 'config': config,
-                                          'header': 'check', 'overwrite': overwrite})
+                                          'header': header, 'overwrite': overwrite})
+
+    def run(self, path, ui=False, wall=60):
+        """Start a run and wait for it: (start status, final status, lines)."""
+        code, r = self.request('/api/run', {'path': path, 'ui': ui})
+        if code != 200:
+            return code, None, []
+        return code, *self.wait_run(wall)
+
+    def wait_run(self, wall, until=None):
+        lines, since, end = [], 0, time.time() + wall
+        st = {}
+        while time.time() < end:
+            code, st = self.get(f'/api/run?since={since}')
+            if code != 200 or 'lines' not in st:
+                return {}, lines
+            lines += st['lines']
+            since = st['next']
+            if not st['running'] or (until and until(lines)):
+                return st, lines
+            time.sleep(0.1)
+        return st, lines
+
+
+def raw_post(port, headers):
+    """Status line of a hand-made POST: urllib would fix the headers."""
+    with socket.create_connection(('127.0.0.1', port), timeout=3) as s:
+        s.sendall((f'POST /api/render HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n'
+                   + ''.join(f'{k}: {v}\r\n' for k, v in headers.items()) + '\r\n').encode())
+        try:
+            return s.recv(200).split(b'\r\n')[0].decode() or 'connection closed, no reply'
+        except socket.timeout:
+            return 'no reply (server stuck reading the body)'
+
+
+def hello(validator='Hello', timeout_ms=2000):
+    return minimal(timeout_ms=timeout_ms,
+                   mote_types=[{'name': 'h', 'firmware': 'firmware/sky/hello-world.sky'}],
+                   nodes=[{'type': 'h', 'id': 1}],
+                   test={'validators': [{'pattern': validator, 'min_count': 1}]})
 
 
 def minimal(**extra):
@@ -172,6 +221,51 @@ def server_checks(ed):
     again = ed.render(r['config'])['yaml'] if code == 200 else None
     expect('saved file loads back to the same text', again == saved, True)
 
+    # comments: the leading block is kept, the rest counted
+    code, r = ed.load('configs/test-mixed-platform-rpl.yaml')
+    expect('leading comment block comes back as the header',
+           r.get('header', '').startswith('Three CPU architectures and three radio models'), True)
+    expect('comments inside the file counted', r.get('comments'), 2)
+    code, r = ed.load('test/configs/yaml-features.yaml')
+    expect("'#' in quoted strings and block scalars is not a comment", r.get('comments'), 0)
+    long = '\n'.join(f'line {i}: ' + 'x' * 60 for i in range(30))
+    ed.save(target, minimal(), overwrite=True, header=long)
+    code, r = ed.load(target)
+    expect('a 2000-character header is written whole, and the writer\'s own comments are not counted',
+           (r.get('header') == long, r.get('comments')), (True, 0))
+
+    r = ed.render(minimal(mote_types=[{'name': 'a', 'firmware': 'firmware/sky/no-such.sky'}]))
+    expect('missing firmware is a warning, not an error', (r['ok'], r.get('missing')),
+           (True, ['firmware/sky/no-such.sky']))
+
+    expect('non-numeric Content-Length', raw_post(ed.port, {'Content-Length': 'abc'}), 'HTTP/1.0 400 Bad Request')
+    expect('negative Content-Length', raw_post(ed.port, {'Content-Length': '-1'}), 'HTTP/1.0 400 Bad Request')
+
+
+def run_checks(ed):
+    ed.save(f'{SAVE_DIR}/pass.yaml', hello())
+    ed.save(f'{SAVE_DIR}/fail.yaml', hello('No such line'))
+    code, st, lines = ed.run(f'{SAVE_DIR}/pass.yaml')
+    expect('run: a passing test exits 0', (code, st and st['exit'], any('TEST PASSED' in l for l in lines)),
+           (200, 0, True))
+    code, st, _ = ed.run(f'{SAVE_DIR}/fail.yaml')
+    expect('run: a failed validator exits 1', (code, st and st['exit']), (200, 1))
+    expect('run: outside the repository refused', ed.request('/api/run', {'path': '../x.yaml'})[0], 400)
+    expect('run: a file that does not exist refused',
+           ed.request('/api/run', {'path': f'{SAVE_DIR}/none.yaml'})[0], 400)
+
+    # A live-view run is paced (10x), so a 60 s simulation lasts long enough
+    # to see output arrive while it runs, a second start refused, and a stop.
+    ed.save(f'{SAVE_DIR}/long.yaml', hello(timeout_ms=60000))
+    code, _ = ed.request('/api/run', {'path': f'{SAVE_DIR}/long.yaml', 'ui': True})
+    st, lines = ed.wait_run(20, until=lambda ls: any('UI server listening' in l for l in ls))
+    expect('run: output streams while it runs', (code, st.get('running'), bool(st.get('ui_url'))), (200, True, True))
+    expect('run: a second run is refused meanwhile',
+           ed.request('/api/run', {'path': f'{SAVE_DIR}/pass.yaml'})[0], 409)
+    ed.request('/api/run/stop', {})
+    st, _ = ed.wait_run(10)
+    expect('run: stop', (st.get('running'), st.get('stopped')), (False, True))
+
 
 def writer_guard_check(tmp):
     """A runner whose writer emits a file that does not load: render must
@@ -212,8 +306,9 @@ def browser_checks(ed, tmp):
             [node, '-e', 'process.exit(typeof WebSocket === "function" ? 0 : 1)']).returncode:
         print('  skip browser checks: needs Node 22+ and Chrome/Chromium (CHROME=...)')
         return
+    ed.save(f'{SAVE_DIR}/pass.yaml', hello(), overwrite=True)
     p = subprocess.run([node, BROWSER_CHECK, ed.base, chrome, str(free_port()),
-                        os.path.join(tmp, 'chrome-profile')],
+                        os.path.join(tmp, 'chrome-profile'), f'{SAVE_DIR}/pass.yaml'],
                        capture_output=True, text=True, timeout=180)
     sys.stdout.write(p.stdout)
     if p.returncode:
@@ -230,6 +325,7 @@ def main():
             print('server:')
             server_checks(ed)
             writer_guard_check(tmp)
+            run_checks(ed)
             print('page:')
             browser_checks(ed, tmp)
         finally:

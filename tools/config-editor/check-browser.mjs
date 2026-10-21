@@ -1,7 +1,10 @@
 // Drives the config editor page in headless Chrome over the DevTools
 // protocol.  Run by tools/check-config-editor.py, which starts the server:
 //
-//   node check-browser.mjs <editor-url> <chrome> <debug-port> <profile-dir>
+//   node check-browser.mjs <editor-url> <chrome> <debug-port> <profile-dir> <passing-config>
+//
+// <passing-config> is a repo-relative config whose test passes quickly; the
+// Run button is tried on it.
 //
 // Needs Node 22+ (global WebSocket and fetch); nothing to install.  Input is
 // set the way a user's typing would land (value + input/change events), and
@@ -9,7 +12,7 @@
 // failed, 2 the browser could not be driven.
 import { spawn } from 'node:child_process';
 
-const [url, chromePath, debugPort, profile] = process.argv.slice(2);
+const [url, chromePath, debugPort, profile, passingConfig] = process.argv.slice(2);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const chrome = spawn(chromePath, ['--headless=new', `--remote-debugging-port=${debugPort}`,
   `--user-data-dir=${profile}`, '--window-size=1400,900', 'about:blank'], { stdio: 'ignore' });
@@ -123,6 +126,50 @@ async function main() {
   r = await settled();
   expect('no medium added on load', [await js(`return 'medium' in cfg`), r.status, r.text.includes('medium:')],
     [false, 'ok', false]);
+
+  // Undo/redo: a generated layout is one step; keystrokes in one field are one step.
+  await js(`window.confirm = () => true; document.getElementById('b-new').click()`);
+  await click('#p-types button', 'Mote type');
+  await setInput('#p-types input[list=dl-firmware]', 0, 'firmware/sky/hello-world.sky');
+  await js(`
+    document.getElementById('b-gen').click();
+    document.getElementById('g-count').value = 3;
+    document.getElementById('g-ok').click();`);
+  await js(`document.getElementById('b-undo').click()`);
+  const afterUndo = await js(`return cfg.nodes.length`);
+  await js(`document.getElementById('b-redo').click()`);
+  expect('undo / redo a generated layout', [afterUndo, await js(`return cfg.nodes.length`)], [0, 3]);
+  await js(`document.querySelector('[data-tab=sim]').click()`);
+  await setInput('#p-sim input[type=text]', 0, 'A');
+  await setInput('#p-sim input[type=text]', 0, 'AB');
+  await js(`document.getElementById('b-undo').click()`);
+  expect('typing in one field is one undo step', await js(`return cfg.title`), 'New simulation');
+
+  // Comments: the top one is carried as the header, the others are announced.
+  await js(`dirty = false; await openPath('configs/test-mixed-platform-rpl.yaml')`);
+  expect('dropped comments announced, header kept', [
+    await js(`return document.getElementById('note').textContent.startsWith('2 comments')`),
+    await js(`return document.querySelectorAll('#p-sim textarea')[1].value.startsWith('Three CPU')`)], [true, true]);
+  r = await settled();
+  expect('the header is written at the top', r.text.startsWith('# Three CPU'), true);
+
+  // A firmware path that does not exist: valid, with a warning on its type.
+  await js(`document.querySelector('[data-tab=types]').click()`);
+  await setInput('#p-types input[list=dl-firmware]', 0, 'firmware/sky/no-such.sky');
+  r = await settled();
+  expect('missing firmware warned', [r.status, await js(`return document.querySelectorAll('.fw-hint.missing').length`)],
+    ['warn', 1]);
+
+  // The Run button on a saved, unchanged config: no save, a run, a verdict.
+  await js(`dirty = false; await openPath(${JSON.stringify(passingConfig)})`);
+  await js(`document.getElementById('b-run').click()`);
+  let verdict = '';
+  for (let i = 0; i < 200 && !/passed|failed|stopped/.test(verdict); i++) {
+    await sleep(100);
+    verdict = await js(`return document.getElementById('run-status').textContent`);
+  }
+  expect('Run button: test passed', [/: passed/.test(verdict), await js(`return !document.getElementById('run').hidden`)],
+    [true, true]);
 
   expect('no exceptions in the page', exceptions, []);
 }

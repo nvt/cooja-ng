@@ -101,10 +101,12 @@ GNU Lightning is optional (auto-detected via pkg-config). Without it, the interp
 ./build/test_runner config-convert in.json out.yaml        # canonical v2 YAML ('-' = stdout, optional 3rd arg = header)
 ./build/test_runner config-to-json in.yaml                 # validated tree as JSON (for tools without a YAML parser)
 python3 tools/config-editor.py [configs/x.yaml] --open     # browser config editor at 127.0.0.1:8091: forms, a
-                                         # draggable topology, layout generator, live check. Stdlib Python + one
-                                         # offline HTML page; loading, validation and the YAML all go through
-                                         # test_runner (above), so the editor cannot drift from the schema.
-                                         # Comments in a loaded file are not kept
+                                         # draggable topology, layout generator, live check, undo/redo, and
+                                         # Run / Run with live view (test_runner test [--ui], output streamed,
+                                         # verdict from the exit code). Stdlib Python + one offline HTML page;
+                                         # loading, validation and the YAML all go through test_runner (above),
+                                         # so the editor cannot drift from the schema. A file's top comment is
+                                         # kept; comments elsewhere are dropped, and the page says how many
 python3 tools/check-config-editor.py                       # its server checks; plus the page in headless Chrome
                                          # when Node 22+ and Chrome are installed (skipped otherwise)
 
