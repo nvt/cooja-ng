@@ -98,7 +98,13 @@ GNU Lightning is optional (auto-detected via pkg-config). Without it, the interp
                                          # hex, 2nd document, wrong type ...) MUST fail to load — fail loudly
 ./build/test_runner config-depth           # nesting cap: YAML and JSON both parse 999 nested lists, refuse
                                          # 1000, and refuse 200000 without exhausting the stack
-./build/test_runner config-convert in.json out.yaml        # canonical v2 YAML
+./build/test_runner config-convert in.json out.yaml        # canonical v2 YAML ('-' = stdout, optional 3rd arg = header)
+./build/test_runner config-to-json in.yaml                 # validated tree as JSON (for tools without a YAML parser)
+python3 tools/config-editor.py [configs/x.yaml] --open     # browser config editor at 127.0.0.1:8091: forms, a
+                                         # draggable topology, layout generator, live check. Stdlib Python + one
+                                         # offline HTML page; loading, validation and the YAML all go through
+                                         # test_runner (above), so the editor cannot drift from the schema.
+                                         # Comments in a loaded file are not kept
 
 # Determinism gates. check-determinism.sh runs ONE simulation twice and diffs
 # the two runs (is a run reproducible? CI runs it). check-baseline.sh asks

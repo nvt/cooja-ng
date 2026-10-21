@@ -1,7 +1,8 @@
 /*
  * Config tooling modes:
  *
- *   config-convert   <in.{json,yaml}> <out.yaml>
+ *   config-convert   <in.{json,yaml}> <out.yaml|-> [header]
+ *   config-to-json   <in.{json,yaml}>
  *   config-roundtrip <config...>
  *   config-reject    <config...>
  *   config-depth
@@ -40,18 +41,53 @@ static int write_to(const sim_normalized_config_t *cfg, const char *path,
 
 int run_config_convert(int argc, char **argv);
 int run_config_convert(int argc, char **argv) {
-    if (argc != 2) {
-        fprintf(stderr, "Usage: test_runner config-convert <in.{json,yaml}> <out.yaml>\n");
+    if (argc != 2 && argc != 3) {
+        fprintf(stderr, "Usage: test_runner config-convert <in.{json,yaml}> <out.yaml|-> [header]\n");
         return 1;
     }
     sim_normalized_config_t cfg;
     if (sim_config_load(&cfg, argv[0]) != 0) return 1;
     char header[512];
-    snprintf(header, sizeof(header), "converted from %s by cooja-ng %s", argv[0], CSIM_VERSION);
-    int rc = write_to(&cfg, argv[1], header);
+    if (argc == 3) snprintf(header, sizeof(header), "%s", argv[2]);
+    else snprintf(header, sizeof(header), "converted from %s by cooja-ng %s", argv[0], CSIM_VERSION);
+    int rc;
+    if (strcmp(argv[1], "-") == 0) {          /* stdout: for tools that pipe it */
+        rc = sim_config_write_yaml(&cfg, stdout, header);
+        fflush(stdout);
+    } else {
+        rc = write_to(&cfg, argv[1], header);
+        if (rc == 0) printf("Wrote %s\n", argv[1]);
+    }
     sim_config_free(&cfg);
-    if (rc == 0) printf("Wrote %s\n", argv[1]);
     return rc == 0 ? 0 : 1;
+}
+
+/* The validated tree as JSON on stdout — how a tool without a YAML parser
+ * (tools/config-editor.py) reads a YAML config.  The file must load as a
+ * config first, so whatever is printed is something the simulator accepts. */
+int run_config_to_json(int argc, char **argv);
+int run_config_to_json(int argc, char **argv) {
+    if (argc != 1) {
+        fprintf(stderr, "Usage: test_runner config-to-json <in.{json,yaml}>\n");
+        return 1;
+    }
+    sim_normalized_config_t cfg;
+    if (sim_config_load(&cfg, argv[0]) != 0) return 1;
+    sim_config_free(&cfg);
+    char *text = slurp(argv[0]);
+    if (!text) { fprintf(stderr, "cannot read %s\n", argv[0]); return 1; }
+    const char *ext = strrchr(argv[0], '.');
+    cJSON *root = (ext && strcmp(ext, ".json") == 0)
+                ? cJSON_Parse(text)
+                : sim_config_yaml_to_cjson(text, strlen(text), argv[0]);
+    free(text);
+    if (!root) return 1;
+    char *out = cJSON_Print(root);
+    cJSON_Delete(root);
+    if (!out) return 1;
+    puts(out);
+    free(out);
+    return 0;
 }
 
 /* Fields the v1 -> v2 lift legitimately changes; blanked before comparing. */

@@ -59,6 +59,7 @@ extern int run_arm_benchmarks(void);
 extern int run_arm_decode_tests(int verbose);
 extern int run_arm_jit_tests(int verbose);
 extern int run_config_convert(int argc, char **argv);
+extern int run_config_to_json(int argc, char **argv);
 extern int run_config_roundtrip(int argc, char **argv);
 extern int run_config_reject(int argc, char **argv);
 extern int run_config_depth(int argc, char **argv);
@@ -145,7 +146,7 @@ int main(int argc, char **argv) {
         printf("Event queue:  event-queue\n");
         printf("Test:         test <config.yaml|json> [-v] [-t ms] [--seed N] [--save-config out.yaml]\n");
     printf("              ... [--shell] [--script FILE] [--paused] [--speed N|max|realtime]  (docs/shell.md)\n");
-        printf("Config:       config-convert <in> <out.yaml> | config-roundtrip <config...> | config-reject <config...> | config-depth\n");
+        printf("Config:       config-convert <in> <out.yaml|-> [header] | config-to-json <in> | config-roundtrip <config...> | config-reject <config...> | config-depth\n");
         printf("Combined:     all\n");
         return 1;
     }
@@ -424,6 +425,8 @@ int main(int argc, char **argv) {
 
     if (strcmp(mode, "config-convert") == 0)
         return run_config_convert(argc - 2, argv + 2);
+    if (strcmp(mode, "config-to-json") == 0)
+        return run_config_to_json(argc - 2, argv + 2);
     if (strcmp(mode, "config-roundtrip") == 0)
         return run_config_roundtrip(argc - 2, argv + 2) ? 1 : 0;
     if (strcmp(mode, "config-reject") == 0)

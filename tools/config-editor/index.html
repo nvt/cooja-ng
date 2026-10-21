@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cooja-NG Config Editor</title>
+<!--
+  Served by tools/config-editor.py.  The page edits the config as a v2 tree
+  (the shape config-to-json prints) and asks the server for everything else:
+  loading, validation and the YAML itself all come from build/test_runner, so
+  nothing here parses or writes YAML.  Keys the forms do not show (a node's
+  peripherals, a mote type's description) stay in the tree untouched.
+-->
+<style>
+:root {
+  --bg:#0d1117; --panel:#161b22; --border:#30363d; --text:#c9d1d9; --muted:#8b949e;
+  --dim:#484f58; --accent:#58a6ff; --green:#3fb950; --yellow:#d29922; --red:#f85149;
+  --btn:#21262d; --btn-hover:#30363d; --input:#0d1117; --sel:#1f6feb33;
+}
+:root[data-theme="light"] {
+  --bg:#ffffff; --panel:#f6f8fa; --border:#d0d7de; --text:#1f2328; --muted:#656d76;
+  --dim:#8c959f; --accent:#0969da; --green:#1a7f37; --yellow:#9a6700; --red:#cf222e;
+  --btn:#f6f8fa; --btn-hover:#eaeef2; --input:#ffffff; --sel:#0969da1a;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font:13px/1.45 -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; background:var(--bg); color:var(--text);
+       height:100vh; display:flex; flex-direction:column; overflow:hidden; }
+code, pre, input, textarea, select, .mono { font-family:'SF Mono', Menlo, Consolas, monospace; font-size:12px; }
+header { background:var(--panel); border-bottom:1px solid var(--border); padding:8px 14px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+header h1 { font-size:14px; font-weight:600; color:var(--accent); margin-right:8px; white-space:nowrap; }
+header .grow { flex:1; }
+button, .btn { background:var(--btn); color:var(--text); border:1px solid var(--border); border-radius:5px; padding:4px 10px;
+       font:inherit; font-size:12px; cursor:pointer; white-space:nowrap; }
+button:hover { background:var(--btn-hover); }
+button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+button.danger { color:var(--red); }
+button.icon { padding:2px 7px; }
+input, select, textarea { background:var(--input); color:var(--text); border:1px solid var(--border); border-radius:4px; padding:3px 6px; width:100%; }
+input:focus, select:focus, textarea:focus { outline:none; border-color:var(--accent); }
+input[type=checkbox] { width:auto; }
+textarea { resize:vertical; min-height:56px; }
+.main { flex:1; display:flex; overflow:hidden; }
+.left { width:520px; min-width:380px; border-right:1px solid var(--border); display:flex; flex-direction:column; background:var(--panel); }
+.tabs { display:flex; border-bottom:1px solid var(--border); flex-shrink:0; }
+.tabs button { flex:1; border:none; border-radius:0; background:none; color:var(--muted); padding:8px 4px; border-bottom:2px solid transparent; }
+.tabs button.active { color:var(--accent); border-bottom-color:var(--accent); }
+.tabs .count { color:var(--dim); font-size:11px; margin-left:3px; }
+.pane { display:none; overflow-y:auto; flex:1; padding:12px 14px 24px; }
+.pane.active { display:block; }
+h2 { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:16px 0 8px; font-weight:600; }
+h2:first-child { margin-top:0; }
+.grid2 { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:8px 10px; }
+.grid4 { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:8px 10px; }
+label.f { display:flex; flex-direction:column; gap:3px; font-size:11px; color:var(--muted); }
+label.f.wide { grid-column:1 / -1; }
+label.chk { display:flex; align-items:center; gap:6px; font-size:12px; }
+.hint { color:var(--dim); font-size:11px; margin-top:4px; }
+table.t { width:100%; border-collapse:collapse; }
+table.t th { text-align:left; font-size:11px; color:var(--muted); font-weight:500; padding:2px 3px; }
+table.t td { padding:2px 3px; vertical-align:middle; }
+table.t tr.sel td { background:var(--sel); }
+table.t td.n { width:64px; }
+table.t td.del { width:28px; }
+.swatch { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:4px; vertical-align:middle; }
+.card { border:1px solid var(--border); border-radius:6px; padding:8px 10px; margin-bottom:8px; background:var(--bg); }
+.card-head { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+.card-head .name { flex:1; }
+details summary { cursor:pointer; color:var(--muted); font-size:11px; margin-top:6px; }
+.row { display:flex; gap:6px; align-items:center; margin-top:8px; flex-wrap:wrap; }
+.right { flex:1; display:flex; flex-direction:column; min-width:0; }
+.topo { flex:1; position:relative; min-height:200px; }
+.topo canvas { position:absolute; inset:0; width:100%; height:100%; cursor:crosshair; }
+.topo .bar { position:absolute; top:8px; left:8px; right:8px; display:flex; gap:6px; align-items:center; pointer-events:none; flex-wrap:wrap; }
+.topo .bar > * { pointer-events:auto; }
+.topo .bar select { width:auto; }
+.topo .legend { position:absolute; bottom:8px; left:10px; font-size:11px; color:var(--muted); pointer-events:none; }
+.out { height:42%; border-top:1px solid var(--border); display:flex; flex-direction:column; background:var(--panel); }
+.out-head { display:flex; gap:8px; align-items:center; padding:6px 12px; border-bottom:1px solid var(--border); flex-wrap:wrap; }
+.out-head input { width:260px; }
+.pill { font-size:11px; border-radius:10px; padding:1px 8px; font-weight:600; }
+.pill.ok { background:#3fb95026; color:var(--green); }
+.pill.bad { background:#f8514926; color:var(--red); }
+.pill.wait { background:var(--btn); color:var(--muted); }
+pre#yaml { flex:1; overflow:auto; padding:10px 14px; white-space:pre; color:var(--text); }
+pre#yaml.err { color:var(--red); white-space:pre-wrap; }
+#cmd { color:var(--muted); font-size:11px; padding:0 14px 6px; }
+#banner { display:none; background:#d2992226; color:var(--yellow); padding:6px 14px; border-bottom:1px solid var(--border); }
+#toast { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:var(--panel); border:1px solid var(--border);
+         padding:6px 14px; border-radius:6px; opacity:0; transition:opacity .2s; pointer-events:none; }
+#toast.show { opacity:1; }
+dialog { background:var(--panel); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:16px; width:360px; margin:auto; }
+dialog::backdrop { background:#0008; }
+dialog h3 { font-size:14px; margin-bottom:10px; }
+@media (max-width: 900px) {
+  .main { flex-direction:column; overflow:auto; }
+  .left { width:auto; min-width:0; border-right:none; border-bottom:1px solid var(--border); max-height:none; }
+  .pane { overflow:visible; }
+  .right { min-height:700px; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>Config Editor</h1>
+  <button id="b-new">New</button>
+  <select id="b-open" style="width:auto;max-width:260px"><option value="">Open from configs/…</option></select>
+  <button id="b-upload">Open file…</button>
+  <input type="file" id="f-upload" accept=".yaml,.yml,.json" hidden>
+  <span class="grow"></span>
+  <span id="dirty" class="hint"></span>
+  <button id="b-theme">Light</button>
+</header>
+<div id="banner"></div>
+<div class="main">
+  <div class="left">
+    <div class="tabs">
+      <button data-tab="sim" class="active">Simulation</button>
+      <button data-tab="types">Mote types<span class="count" id="c-types"></span></button>
+      <button data-tab="nodes">Nodes<span class="count" id="c-nodes"></span></button>
+      <button data-tab="test">Test</button>
+    </div>
+    <div class="pane active" id="p-sim"></div>
+    <div class="pane" id="p-types"></div>
+    <div class="pane" id="p-nodes"></div>
+    <div class="pane" id="p-test"></div>
+  </div>
+  <div class="right">
+    <div class="topo" id="topo">
+      <canvas id="cv"></canvas>
+      <div class="bar">
+        <span class="hint">Add as</span>
+        <select id="add-type"></select>
+        <button id="b-gen">Generate layout…</button>
+        <button id="b-fit">Fit</button>
+      </div>
+      <div class="legend" id="legend">Double-click to add a node · drag to move · click to select</div>
+    </div>
+    <div class="out">
+      <div class="out-head">
+        <span id="status" class="pill wait">…</span>
+        <span class="grow" style="flex:1"></span>
+        <input id="save-path" placeholder="configs/my-sim.yaml" spellcheck="false">
+        <button id="b-save" class="primary">Save</button>
+        <button id="b-download">Download</button>
+        <button id="b-copy">Copy</button>
+      </div>
+      <pre id="yaml"></pre>
+      <div id="cmd" class="mono"></div>
+    </div>
+  </div>
+</div>
+
+<dialog id="gen">
+  <h3>Generate layout</h3>
+  <div class="grid2">
+    <label class="f">Shape<select id="g-shape">
+      <option value="line">Line (chain)</option><option value="grid">Grid</option>
+      <option value="star">Star (root in centre)</option><option value="random">Random</option></select></label>
+    <label class="f">Nodes<input id="g-count" type="number" min="1" value="4"></label>
+    <label class="f">Spacing / area (m)<input id="g-spacing" type="number" min="0" value="20"></label>
+    <label class="f">Mote type<select id="g-type"></select></label>
+    <label class="f wide">First node's type (e.g. a root)<select id="g-first"></select></label>
+    <label class="chk wide"><input type="checkbox" id="g-replace" checked> Replace existing nodes</label>
+  </div>
+  <div class="row" style="justify-content:flex-end">
+    <button id="g-cancel">Cancel</button><button id="g-ok" class="primary">Generate</button>
+  </div>
+</dialog>
+<datalist id="dl-firmware"></datalist>
+<datalist id="dl-medium"><option value="udgm"><option value="none"><option value="lossy"><option value="gilbert-elliott"></datalist>
+<datalist id="dl-plugins"><option value="energest"></datalist>
+<div id="toast"></div>
+
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+const HEADER = 'written by tools/config-editor.py';
+const PALETTE = ['#58a6ff', '#3fb950', '#d29922', '#f778ba', '#a371f7', '#ff9f43', '#39c5cf', '#f85149'];
+
+let cfg = null;            // the v2 tree being edited
+let info = { firmware: [], configs: [], plugins: [], runner: false };
+let server = true;         // false when the page was opened without the server
+let lastYaml = '';
+let selected = -1;         // selected node index
+let dirty = false;
+
+/* ---------- theme ---------- */
+function setTheme(t) {
+  document.documentElement.dataset.theme = t;
+  $('b-theme').textContent = t === 'dark' ? 'Light' : 'Dark';
+  try { localStorage.setItem('csim-theme', t); } catch (e) {}
+  draw();
+}
+$('b-theme').onclick = () => setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+let theme0 = 'dark';
+try { theme0 = localStorage.getItem('csim-theme') || 'dark'; } catch (e) {}
+document.documentElement.dataset.theme = theme0;
+$('b-theme').textContent = theme0 === 'dark' ? 'Light' : 'Dark';
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+
+/* ---------- model ---------- */
+function blank() {
+  return {
+    version: 2, title: 'New simulation', timeout_ms: 60000, seed: 42,
+    medium: { type: 'udgm', tx_range: 50, interference_range: 100, success_ratio_tx: 1, success_ratio_rx: 1 },
+    mote_types: [], nodes: [],
+  };
+}
+function stem(path) {
+  const b = (path || '').split('/').pop();
+  const i = b.lastIndexOf('.');
+  return i > 0 ? b.slice(0, i) : b;
+}
+function typeIndex(name) { return cfg.mote_types.findIndex((t) => t.name === name); }
+function typeColor(name) { const i = typeIndex(name); return i < 0 ? css('--red') : PALETTE[i % PALETTE.length]; }
+function nextId() { return cfg.nodes.reduce((m, n) => Math.max(m, n.id || 0), 0) + 1; }
+function boardOf(fw) { const f = info.firmware.find((x) => x.path === fw); return f ? f.board : ''; }
+function round1(v) { return Math.round(v * 10) / 10; }
+
+function changed(structural) {
+  dirty = true;
+  $('dirty').textContent = 'unsaved changes';
+  if (structural) renderForms();
+  updateCounts();
+  draw();
+  scheduleRender();
+}
+
+/* ---------- small form builders ---------- */
+function el(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === 'class') e.className = v;
+    else if (k.startsWith('on')) e[k] = v;
+    else if (v !== undefined && v !== null) e.setAttribute(k, v);
+  }
+  for (const k of kids.flat()) if (k != null) e.append(k.nodeType ? k : document.createTextNode(k));
+  return e;
+}
+/* An input bound to obj[key].  kind: text | num | int | area | bool.
+ * Clearing a field removes the key, so the writer's defaults apply. */
+function bind(obj, key, kind, opts = {}) {
+  let e;
+  if (kind === 'bool') {
+    e = el('input', { type: 'checkbox' });
+    e.checked = !!obj[key];
+    e.onchange = () => { if (e.checked) obj[key] = true; else delete obj[key]; changed(opts.structural); };
+    return e;
+  }
+  e = kind === 'area' ? el('textarea', { rows: opts.rows || 3 }) : el('input', {
+    type: kind === 'text' ? 'text' : 'number', step: kind === 'int' ? '1' : 'any',
+    placeholder: opts.placeholder, list: opts.list, spellcheck: 'false',
+  });
+  if (obj[key] !== undefined) e.value = obj[key];
+  const apply = () => {
+    const v = e.value;
+    const old = obj[key];
+    if (v === '') { if (opts.required && kind === 'text') obj[key] = ''; else delete obj[key]; }
+    else if (kind === 'num' || kind === 'int') { const n = Number(v); if (Number.isFinite(n)) obj[key] = kind === 'int' ? Math.trunc(n) : n; }
+    else obj[key] = v;
+    if (opts.onset) opts.onset(old, obj[key]);
+    changed(opts.structural);
+  };
+  e.addEventListener(opts.structural ? 'change' : 'input', apply);
+  return e;
+}
+const field = (label, input, cls) => el('label', { class: 'f' + (cls ? ' ' + cls : '') }, label, input);
+
+function table(rows, cols, mk, addLabel) {
+  const t = el('table', { class: 't' });
+  t.append(el('tr', {}, cols.map((c) => el('th', {}, c)), el('th')));
+  rows.forEach((r, i) => {
+    const cells = mk(r, i);
+    t.append(el('tr', {}, cells.map((c) => el('td', {}, c)),
+      el('td', { class: 'del' }, el('button', { class: 'icon danger', title: 'Remove',
+        onclick: () => { rows.splice(i, 1); changed(true); } }, '×'))));
+  });
+  return t;
+}
+
+/* ---------- Simulation pane ---------- */
+function renderSim() {
+  const p = $('p-sim'); p.replaceChildren();
+  cfg.medium = cfg.medium || { type: 'udgm' };
+  const m = cfg.medium;
+  p.append(
+    el('h2', {}, 'General'),
+    el('div', { class: 'grid2' },
+      field('Title', bind(cfg, 'title', 'text'), 'wide'),
+      field('Description', bind(cfg, 'description', 'area', { rows: 2 }), 'wide'),
+      field('Duration (timeout_ms)', bind(cfg, 'timeout_ms', 'int', { placeholder: '20000' })),
+      field('Random seed', bind(cfg, 'seed', 'int', { placeholder: 'none' })),
+      field('Startup delay (ms)', bind(cfg, 'startup_delay_ms', 'int', { placeholder: '0' })),
+      field('Speed (× real time)', bind(cfg, 'speed', 'num', { placeholder: 'max' }))),
+    el('div', { class: 'hint' }, 'The same seed gives a byte-identical run. Leave speed empty to run as fast as possible.'),
+    el('h2', {}, 'Radio medium'),
+    el('div', { class: 'grid2' },
+      field('Type', bind(m, 'type', 'text', { list: 'dl-medium', structural: true })),
+      el('span'),
+      field('TX range (m)', bind(m, 'tx_range', 'num', { placeholder: '50' })),
+      field('Interference range (m)', bind(m, 'interference_range', 'num', { placeholder: '100' })),
+      field('Success ratio TX', bind(m, 'success_ratio_tx', 'num', { placeholder: '1.0' })),
+      field('Success ratio RX', bind(m, 'success_ratio_rx', 'num', { placeholder: '1.0' }))),
+    el('div', { class: 'hint' }, 'udgm is the unit-disk graph medium; a plugin medium (lossy, gilbert-elliott) also needs its .so under Plugins.'));
+
+  cfg.plugins = cfg.plugins || [];
+  p.append(el('h2', {}, 'Plugins'));
+  if (cfg.plugins.length)
+    p.append(table(cfg.plugins, ['Built-in name or .so path'], (_, i) => [
+      (() => { const o = { v: cfg.plugins[i] }; const e = bind(o, 'v', 'text', { list: 'dl-plugins' });
+               e.addEventListener('input', () => { cfg.plugins[i] = o.v || ''; }); return e; })()]));
+  p.append(el('div', { class: 'row' }, el('button', { onclick: () => { cfg.plugins.push(''); changed(true); } }, '+ Plugin')));
+
+  p.append(el('h2', {}, 'Serial socket'));
+  const ss = cfg.serial_socket;
+  p.append(el('label', { class: 'chk' }, el('input', { type: 'checkbox', ...(ss ? { checked: '' } : {}),
+    onchange: (e) => { if (e.target.checked) cfg.serial_socket = { port: 60001, node: 1 }; else delete cfg.serial_socket; changed(true); } }),
+    'Expose a node\'s serial port on a TCP socket'));
+  if (ss) p.append(el('div', { class: 'grid2', style: 'margin-top:8px' },
+    field('Port', bind(ss, 'port', 'int')), field('Node', bind(ss, 'node', 'int')),
+    field('Command (helper process)', bind(ss, 'command', 'text'), 'wide')));
+}
+
+/* ---------- Mote types pane ---------- */
+function renderTypes() {
+  const p = $('p-types'); p.replaceChildren();
+  p.append(el('div', { class: 'hint', style: 'margin:0 0 10px' },
+    'A mote type is a firmware image; nodes refer to it by name. The firmware extension selects the board.'));
+  cfg.mote_types.forEach((t, i) => {
+    const used = cfg.nodes.filter((n) => n.type === t.name).length;
+    const rename = (old, now) => { cfg.nodes.forEach((n) => { if (n.type === old) n.type = now; }); renderNodes(); fillTypeSelects(); };
+    const fw = bind(t, 'firmware', 'text', { list: 'dl-firmware', placeholder: 'firmware/sky/udp-server.sky', structural: true,
+      onset: (old, now) => { if (!t.name || t.name === stem(old) || /^type\d+$/.test(t.name)) { const o = t.name; t.name = stem(now); rename(o, t.name); } } });
+    p.append(el('div', { class: 'card' },
+      el('div', { class: 'card-head' },
+        el('span', { class: 'swatch', style: `background:${PALETTE[i % PALETTE.length]}` }),
+        el('span', { class: 'name' }, bind(t, 'name', 'text', { required: true, structural: true, onset: rename })),
+        el('span', { class: 'hint' }, `${used} node${used === 1 ? '' : 's'}`),
+        el('button', { class: 'icon', title: 'Add a node of this type', onclick: () => addNode(t.name) }, '+ node'),
+        el('button', { class: 'icon danger', title: 'Remove type and its nodes', onclick: () => {
+          if (used && !confirm(`Remove "${t.name}" and its ${used} node(s)?`)) return;
+          cfg.nodes = cfg.nodes.filter((n) => n.type !== t.name); cfg.mote_types.splice(i, 1); changed(true); } }, '×')),
+      field('Firmware', fw),
+      el('div', { class: 'hint' }, boardOf(t.firmware) || (t.firmware ? 'not found under firmware/ (fine if it is built elsewhere)' : '')),
+      el('details', {}, el('summary', {}, 'TrustZone / descriptive fields'),
+        el('div', { class: 'grid2', style: 'margin-top:6px' },
+          field('Secure-world firmware (nRF54L15)', bind(t, 'secure_firmware', 'text', { list: 'dl-firmware' }), 'wide'),
+          field('kind', bind(t, 'kind', 'text', { placeholder: 'emulated-elf' })),
+          field('cpu', bind(t, 'cpu', 'text', { placeholder: 'msp430' })),
+          field('soc', bind(t, 'soc', 'text', { placeholder: 'msp430f1611' })),
+          field('board', bind(t, 'board', 'text', { placeholder: 'sky' }))))));
+  });
+  p.append(el('div', { class: 'row' }, el('button', { class: 'primary', onclick: () => {
+    let n = 1; while (typeIndex('type' + n) >= 0) n++;
+    cfg.mote_types.push({ name: 'type' + n, firmware: '' }); changed(true);
+    setTimeout(() => { const ins = $('p-types').querySelectorAll('input[list=dl-firmware]'); ins[ins.length - 2]?.focus(); }, 0);
+  } }, '+ Mote type')));
+}
+
+/* ---------- Nodes pane ---------- */
+function typeSelect(value, onchange) {
+  const s = el('select', { onchange: (e) => onchange(e.target.value) });
+  for (const t of cfg.mote_types) s.append(el('option', { value: t.name, ...(t.name === value ? { selected: '' } : {}) }, t.name));
+  if (typeIndex(value) < 0) s.append(el('option', { value, selected: '' }, value ? value + ' (missing)' : '—'));
+  return s;
+}
+function renderNodes() {
+  const p = $('p-nodes'); p.replaceChildren();
+  if (!cfg.mote_types.length) {
+    p.append(el('div', { class: 'hint' }, 'Add a mote type first.'));
+    return;
+  }
+  const t = el('table', { class: 't' });
+  t.append(el('tr', {}, ['', 'id', 'type', 'x', 'y', 'clock dev.'].map((c) => el('th', {}, c)), el('th')));
+  cfg.nodes.forEach((n, i) => {
+    const tr = el('tr', { class: i === selected ? 'sel' : '', onclick: () => { selected = i; markSelected(); draw(); } },
+      el('td', {}, el('span', { class: 'swatch', style: `background:${typeColor(n.type)}` })),
+      el('td', { class: 'n' }, bind(n, 'id', 'int', { required: true })),
+      el('td', {}, typeSelect(n.type, (v) => { n.type = v; changed(true); })),
+      el('td', { class: 'n' }, bind(n, 'x', 'num')),
+      el('td', { class: 'n' }, bind(n, 'y', 'num')),
+      el('td', { class: 'n' }, bind(n, 'clock_deviation', 'num', { placeholder: '1.0' })),
+      el('td', { class: 'del' }, el('button', { class: 'icon danger', title: 'Remove', onclick: (e) => {
+        e.stopPropagation(); cfg.nodes.splice(i, 1); selected = -1; changed(true); } }, '×')));
+    if (n.peripherals) tr.title = 'has off-SoC peripherals (kept as loaded)';
+    t.append(tr);
+  });
+  p.append(t, el('div', { class: 'row' },
+    el('button', { class: 'primary', onclick: () => addNode($('add-type').value) }, '+ Node'),
+    el('button', { onclick: () => openGen() }, 'Generate layout…'),
+    el('button', { onclick: () => { cfg.nodes.forEach((n, i) => { n.id = i + 1; }); changed(true); } }, 'Renumber 1…n')),
+    el('div', { class: 'hint' }, 'Node ids are the Contiki-NG node_id (link address). Positions are in metres.'));
+}
+function markSelected() {
+  $('p-nodes').querySelectorAll('tr').forEach((tr, k) => tr.classList.toggle('sel', k - 1 === selected));
+}
+function addNode(type, x, y) {
+  if (!type) { toast('Add a mote type first'); return; }
+  if (x === undefined) {
+    const last = cfg.nodes[cfg.nodes.length - 1];
+    x = last ? round1((last.x || 0) + (cfg.medium?.tx_range || 50) * 0.4) : 0; y = last ? (last.y || 0) : 0;
+  }
+  cfg.nodes.push({ type, id: nextId(), x, y });
+  selected = cfg.nodes.length - 1;
+  changed(true);
+}
+
+/* ---------- Test pane ---------- */
+function renderTest() {
+  const p = $('p-test'); p.replaceChildren();
+  p.append(el('label', { class: 'chk' }, el('input', { type: 'checkbox', ...(cfg.test ? { checked: '' } : {}),
+    onchange: (e) => { if (e.target.checked) cfg.test = { validators: [] }; else delete cfg.test; changed(true); } }),
+    'Include a test section (pass/fail verdict)'));
+  const t = cfg.test;
+  if (!t) {
+    p.append(el('div', { class: 'hint' }, 'Without one the run just simulates for the duration. See docs/test-format.md.'));
+    return;
+  }
+  p.append(el('div', { class: 'grid2', style: 'margin-top:10px' },
+    field('Description', bind(t, 'description', 'text'), 'wide'),
+    el('label', { class: 'chk wide' }, bind(t, 'timeout_is_success', 'bool'), 'Reaching the duration counts as a pass')));
+
+  t.validators = t.validators || [];
+  p.append(el('h2', {}, 'Validators — checked at the end'),
+    t.validators.length ? table(t.validators, ['pattern (substring)', 'node', 'min count'], (v) => [
+      bind(v, 'pattern', 'text', { required: true }),
+      bind(v, 'node', 'int', { placeholder: 'any' }), bind(v, 'min_count', 'int', { placeholder: '1' })]) : '',
+    el('div', { class: 'row' }, el('button', { onclick: () => { t.validators.push({ pattern: '', min_count: 1 }); changed(true); } }, '+ Validator')));
+
+  t.steps = t.steps || [];
+  p.append(el('h2', {}, 'Steps — waited for in order'),
+    t.steps.length ? table(t.steps, ['wait for', 'node', 'count', 'timeout ms'], (s) => [
+      bind(s, 'wait', 'text', { required: true }), bind(s, 'node', 'int', { placeholder: 'any' }),
+      bind(s, 'count', 'int', { placeholder: '1' }), bind(s, 'timeout_ms', 'int', { placeholder: '—' })]) : '',
+    el('div', { class: 'row' }, el('button', { onclick: () => { t.steps.push({ wait: '' }); changed(true); } }, '+ Step')));
+
+  t.fail_on = t.fail_on || [];
+  p.append(el('h2', {}, 'Fail on — any match fails the run'),
+    t.fail_on.length ? table(t.fail_on, ['pattern'], (_, i) => [(() => {
+      const o = { v: t.fail_on[i] }; const e = bind(o, 'v', 'text');
+      e.addEventListener('input', () => { t.fail_on[i] = o.v || ''; }); return e; })()]) : '',
+    el('div', { class: 'row' }, el('button', { onclick: () => { t.fail_on.push(''); changed(true); } }, '+ Pattern')));
+
+  t.actions = t.actions || [];
+  p.append(el('h2', {}, 'Timed actions'),
+    t.actions.length ? table(t.actions, ['at ms', 'type', 'node', 'x', 'y', 'data / type #'], (a) => [
+      bind(a, 'at_ms', 'int', { required: true }),
+      (() => { const s = el('select', { onchange: (e) => { a.type = e.target.value; changed(true); } });
+               for (const k of ['move', 'send', 'send_all', 'remove', 'add']) s.append(el('option', { value: k, ...(a.type === k ? { selected: '' } : {}) }, k));
+               return s; })(),
+      a.type === 'send_all' ? '' : bind(a, 'node', 'int'),
+      (a.type === 'move' || a.type === 'add') ? bind(a, 'x', 'num') : '',
+      (a.type === 'move' || a.type === 'add') ? bind(a, 'y', 'num') : '',
+      a.type === 'add' ? bind(a, 'mote_type', 'int', { placeholder: 'index' })
+        : (a.type === 'send' || a.type === 'send_all') ? bind(a, 'data', 'text', { placeholder: 'serial line' }) : '']) : '',
+    el('div', { class: 'row' }, el('button', { onclick: () => { t.actions.push({ at_ms: 10000, type: 'send', node: 1, data: '' }); changed(true); } }, '+ Action')));
+
+  p.append(el('h2', {}, 'JavaScript test script'),
+    el('div', { class: 'grid2' },
+      field('Script file (js_script)', bind(t, 'js_script', 'text', { placeholder: 'test/scripts/….js' }), 'wide'),
+      field('Inline script (js_script_inline)', bind(t, 'js_script_inline', 'area', { rows: 6 }), 'wide')));
+}
+
+function updateCounts() {
+  $('c-types').textContent = cfg.mote_types.length || '';
+  $('c-nodes').textContent = cfg.nodes.length || '';
+}
+function fillTypeSelects() {
+  for (const id of ['add-type', 'g-type', 'g-first']) {
+    const s = $(id), keep = s.value;
+    s.replaceChildren(...(id === 'g-first' ? [el('option', { value: '' }, '(same as the rest)')] : []),
+      ...cfg.mote_types.map((t) => el('option', { value: t.name }, t.name)));
+    if ([...s.options].some((o) => o.value === keep)) s.value = keep;
+  }
+}
+function renderForms() {
+  renderSim(); renderTypes(); renderNodes(); renderTest(); fillTypeSelects(); updateCounts();
+}
+
+/* ---------- tabs ---------- */
+document.querySelectorAll('.tabs button').forEach((b) => b.onclick = () => {
+  document.querySelectorAll('.tabs button').forEach((x) => x.classList.toggle('active', x === b));
+  document.querySelectorAll('.pane').forEach((x) => x.classList.toggle('active', x.id === 'p-' + b.dataset.tab));
+});
+function showTab(name) { document.querySelector(`.tabs button[data-tab=${name}]`).click(); }
+
+/* ---------- topology canvas ---------- */
+const cv = $('cv'), ctx = cv.getContext('2d');
+let view = { s: 4, ox: 0, oy: 0 };   // screen = world * s + o
+let drag = null, autoFit = true;
+function fit() {
+  const W = cv.clientWidth, H = cv.clientHeight;
+  const pts = cfg.nodes.filter((n) => n.x !== undefined);
+  const r = cfg.medium?.tx_range || 50;
+  let x0 = -r / 2, x1 = r / 2, y0 = -r / 2, y1 = r / 2;
+  if (pts.length) {
+    x0 = Math.min(...pts.map((n) => n.x)) - r * 0.35; x1 = Math.max(...pts.map((n) => n.x)) + r * 0.35;
+    y0 = Math.min(...pts.map((n) => n.y || 0)) - r * 0.35; y1 = Math.max(...pts.map((n) => n.y || 0)) + r * 0.35;
+  }
+  const s = Math.min((W - 40) / Math.max(x1 - x0, 1), (H - 70) / Math.max(y1 - y0, 1));
+  view = { s, ox: W / 2 - s * (x0 + x1) / 2, oy: (H + 30) / 2 - s * (y0 + y1) / 2 };
+}
+const sx = (x) => x * view.s + view.ox, sy = (y) => y * view.s + view.oy;
+const wx = (px) => (px - view.ox) / view.s, wy = (py) => (py - view.oy) / view.s;
+function niceStep(px) {
+  const raw = px / view.s;
+  const p = Math.pow(10, Math.floor(Math.log10(raw)));
+  return [1, 2, 5, 10].map((k) => k * p).find((v) => v >= raw);
+}
+function draw() {
+  if (!cfg) return;
+  const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+  if (cv.width !== W * dpr || cv.height !== H * dpr) { cv.width = W * dpr; cv.height = H * dpr; }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  if (autoFit && !drag) fit();
+  ctx.fillStyle = css('--bg'); ctx.fillRect(0, 0, W, H);
+  // grid
+  const step = niceStep(60);
+  ctx.strokeStyle = css('--border'); ctx.globalAlpha = 0.5; ctx.lineWidth = 1; ctx.beginPath();
+  for (let x = Math.floor(wx(0) / step) * step; x <= wx(W); x += step) { ctx.moveTo(sx(x) + .5, 0); ctx.lineTo(sx(x) + .5, H); }
+  for (let y = Math.floor(wy(0) / step) * step; y <= wy(H); y += step) { ctx.moveTo(0, sy(y) + .5); ctx.lineTo(W, sy(y) + .5); }
+  ctx.stroke(); ctx.globalAlpha = 1;
+  ctx.fillStyle = css('--dim'); ctx.font = '11px -apple-system, sans-serif';
+  ctx.fillText(`grid ${step} m`, W - 70, H - 10);
+
+  const m = cfg.medium || {}, tx = m.tx_range ?? 50, intf = m.interference_range ?? 100;
+  const radio = (m.type || 'udgm') !== 'none';
+  const nodes = cfg.nodes.map((n, i) => ({ n, i, x: n.x || 0, y: n.y || 0 }));
+  // links within TX range
+  if (radio) {
+    ctx.strokeStyle = css('--muted'); ctx.globalAlpha = 0.45; ctx.lineWidth = 1.2; ctx.beginPath();
+    for (let a = 0; a < nodes.length; a++) for (let b = a + 1; b < nodes.length; b++)
+      if (Math.hypot(nodes[a].x - nodes[b].x, nodes[a].y - nodes[b].y) <= tx) {
+        ctx.moveTo(sx(nodes[a].x), sy(nodes[a].y)); ctx.lineTo(sx(nodes[b].x), sy(nodes[b].y));
+      }
+    ctx.stroke(); ctx.globalAlpha = 1;
+  }
+  // ranges of the selected node
+  const sel = nodes[selected];
+  if (sel && radio) {
+    const c = typeColor(sel.n.type);
+    ctx.beginPath(); ctx.arc(sx(sel.x), sy(sel.y), tx * view.s, 0, 2 * Math.PI);
+    ctx.fillStyle = c + '1a'; ctx.fill(); ctx.strokeStyle = c + '99'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.beginPath(); ctx.setLineDash([5, 5]); ctx.arc(sx(sel.x), sy(sel.y), intf * view.s, 0, 2 * Math.PI);
+    ctx.strokeStyle = c + '66'; ctx.stroke(); ctx.setLineDash([]);
+  }
+  // type labels only while they fit; on a dense layout the legend says it
+  let gap = Infinity;
+  for (let a = 0; a < nodes.length && gap >= 70; a++) for (let b = a + 1; b < nodes.length; b++)
+    gap = Math.min(gap, Math.hypot(nodes[a].x - nodes[b].x, nodes[a].y - nodes[b].y) * view.s);
+  for (const { n, i, x, y } of nodes) {
+    const c = typeColor(n.type), r = 11;
+    ctx.beginPath(); ctx.arc(sx(x), sy(y), r, 0, 2 * Math.PI);
+    ctx.fillStyle = c; ctx.fill();
+    if (i === selected) { ctx.lineWidth = 3; ctx.strokeStyle = css('--text'); ctx.stroke(); }
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 11px -apple-system, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(String(n.id ?? '?'), sx(x), sy(y) + .5);
+    if (gap < 70 && i !== selected) continue;
+    ctx.fillStyle = css('--muted'); ctx.font = '10px -apple-system, sans-serif';
+    ctx.fillText(n.type || '', sx(x), sy(y) + r + 9);
+  }
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  const legend = cfg.mote_types.map((t, i) => `<span class="swatch" style="background:${PALETTE[i % PALETTE.length]}"></span>${esc(t.name)}`).join(' &nbsp; ');
+  $('legend').innerHTML = (legend ? legend + ' &nbsp;·&nbsp; ' : '') +
+    (radio ? `solid ring = TX range ${tx} m, dashed = interference ${intf} m · ` : '') + 'double-click to add · drag to move';
+}
+function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function hit(px, py) {
+  for (let i = cfg.nodes.length - 1; i >= 0; i--) {
+    const n = cfg.nodes[i];
+    if (Math.hypot(sx(n.x || 0) - px, sy(n.y || 0) - py) <= 13) return i;
+  }
+  return -1;
+}
+cv.addEventListener('mousedown', (e) => {
+  const i = hit(e.offsetX, e.offsetY);
+  selected = i;
+  if (i >= 0) { drag = { i, moved: false }; showTab('nodes'); }
+  markSelected(); draw();
+});
+cv.addEventListener('mousemove', (e) => {
+  cv.style.cursor = drag ? 'grabbing' : hit(e.offsetX, e.offsetY) >= 0 ? 'grab' : 'crosshair';
+  if (!drag) return;
+  const n = cfg.nodes[drag.i];
+  n.x = round1(wx(e.offsetX)); n.y = round1(wy(e.offsetY));
+  drag.moved = true; draw();
+});
+window.addEventListener('mouseup', () => {
+  if (drag && drag.moved) { autoFit = false; changed(true); }
+  drag = null;
+});
+cv.addEventListener('dblclick', (e) => {
+  if (hit(e.offsetX, e.offsetY) >= 0) return;
+  autoFit = false;
+  addNode($('add-type').value, round1(wx(e.offsetX)), round1(wy(e.offsetY)));
+});
+cv.addEventListener('wheel', (e) => {
+  e.preventDefault(); autoFit = false;
+  const k = Math.exp(-e.deltaY * 0.0015), x = wx(e.offsetX), y = wy(e.offsetY);
+  view.s *= k; view.ox = e.offsetX - x * view.s; view.oy = e.offsetY - y * view.s; draw();
+}, { passive: false });
+$('b-fit').onclick = () => { autoFit = true; draw(); };
+new ResizeObserver(() => draw()).observe($('topo'));
+window.addEventListener('keydown', (e) => {
+  if ((e.key === 'Delete' || e.key === 'Backspace') && selected >= 0 && document.activeElement === document.body) {
+    cfg.nodes.splice(selected, 1); selected = -1; changed(true);
+  }
+  if ((e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); save(); }
+});
+
+/* ---------- layout generator ---------- */
+function openGen() {
+  if (!cfg.mote_types.length) { toast('Add a mote type first'); showTab('types'); return; }
+  fillTypeSelects();
+  $('g-spacing').value = round1((cfg.medium?.tx_range || 50) * 0.8);
+  $('gen').showModal();
+}
+$('b-gen').onclick = openGen;
+$('g-cancel').onclick = () => $('gen').close();
+$('g-ok').onclick = () => {
+  const shape = $('g-shape').value, count = Math.max(1, +$('g-count').value | 0), d = +$('g-spacing').value || 20;
+  const type = $('g-type').value, first = $('g-first').value || type;
+  if ($('g-replace').checked) cfg.nodes = [];
+  let id = nextId();
+  const pts = [];
+  if (shape === 'line') for (let i = 0; i < count; i++) pts.push([i * d, 0]);
+  if (shape === 'grid') { const c = Math.ceil(Math.sqrt(count)); for (let i = 0; i < count; i++) pts.push([(i % c) * d, Math.floor(i / c) * d]); }
+  if (shape === 'star') { pts.push([0, 0]); for (let i = 1; i < count; i++) { const a = 2 * Math.PI * (i - 1) / (count - 1); pts.push([d * Math.cos(a), d * Math.sin(a)]); } }
+  if (shape === 'random') for (let i = 0; i < count; i++) pts.push([Math.random() * d, Math.random() * d]);
+  pts.forEach(([x, y], i) => cfg.nodes.push({ type: i === 0 ? first : type, id: id++, x: round1(x), y: round1(y) }));
+  $('gen').close(); autoFit = true; selected = -1; changed(true);
+};
+
+/* ---------- server ---------- */
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+  if (!r.ok) { const e = new Error(j.error || `HTTP ${r.status}`); e.status = r.status; throw e; }
+  return j;
+}
+/* What goes to the writer: empty optional lists and blank plugin rows dropped. */
+function outgoing() {
+  const c = JSON.parse(JSON.stringify(cfg));
+  if (c.plugins) { c.plugins = c.plugins.filter((s) => s); if (!c.plugins.length) delete c.plugins; }
+  if (c.test) for (const k of ['validators', 'steps', 'fail_on', 'actions']) {
+    if (k === 'fail_on' && c.test[k]) c.test[k] = c.test[k].filter((s) => s);
+    if (c.test[k] && !c.test[k].length) delete c.test[k];
+  }
+  return c;
+}
+let renderTimer = null, renderSeq = 0;
+function scheduleRender() { clearTimeout(renderTimer); renderTimer = setTimeout(renderYaml, 250); }
+async function renderYaml() {
+  if (!server) return;
+  const seq = ++renderSeq;
+  setStatus('wait', 'checking…');
+  try {
+    const r = await api('/api/render', { config: outgoing(), header: HEADER });
+    if (seq !== renderSeq) return;
+    if (r.ok) {
+      lastYaml = r.yaml; $('yaml').className = ''; $('yaml').textContent = r.yaml;
+      setStatus('ok', 'valid — the simulator accepts this');
+    } else {
+      $('yaml').className = 'err'; $('yaml').textContent = r.errors;
+      const n = (r.errors.match(/(\d+) config errors?/) || [])[1];
+      setStatus('bad', n ? `${n} error${n === '1' ? '' : 's'}` : 'does not load');
+    }
+  } catch (e) {
+    if (seq === renderSeq) { setStatus('bad', 'server error'); $('yaml').className = 'err'; $('yaml').textContent = e.message; }
+  }
+  updateCmd();
+}
+function setStatus(kind, text) { const s = $('status'); s.className = 'pill ' + kind; s.textContent = text; }
+function updateCmd() {
+  const p = $('save-path').value || 'configs/….yaml';
+  $('cmd').textContent = `./build/test_runner test ${p}` + (cfg.test ? '' : '    # add --ui 8080 to watch it run');
+}
+function slug(s) { return (s || 'simulation').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 48) || 'simulation'; }
+
+function load(tree, path) {
+  cfg = tree;
+  if (cfg.version !== 2) cfg.version = 2;
+  cfg.mote_types = cfg.mote_types || []; cfg.nodes = cfg.nodes || [];
+  selected = -1; autoFit = true; dirty = false; $('dirty').textContent = '';
+  $('save-path').value = path || `configs/${slug(cfg.title)}.yaml`;
+  renderForms(); draw(); renderYaml();
+}
+function confirmDiscard() { return !dirty || confirm('Discard unsaved changes?'); }
+$('b-new').onclick = () => {
+  if (!confirmDiscard()) return;
+  load(blank(), '');
+  showTab('types');
+};
+$('b-open').onchange = async (e) => {
+  const path = e.target.value; e.target.value = '';
+  if (path && confirmDiscard()) await openPath(path);
+};
+async function openPath(path) {
+  try {
+    const r = await api('/api/load?path=' + encodeURIComponent(path));
+    const yamlPath = path.replace(/\.json$/, '.yaml');
+    load(r.config, yamlPath);
+    toast(path.endsWith('.json') ? `Loaded ${path} — saves as YAML` : `Loaded ${path}`);
+  } catch (err) { alert(`${path} does not load:\n\n${err.message}`); }
+}
+$('b-upload').onclick = () => $('f-upload').click();
+$('f-upload').onchange = async (e) => {
+  const f = e.target.files[0]; e.target.value = '';
+  if (!f || !confirmDiscard()) return;
+  try {
+    const text = await f.text();
+    const tree = server ? (await api('/api/parse', { text, name: f.name })).config : JSON.parse(text);
+    load(tree, 'configs/' + f.name.replace(/\.(json|yml)$/, '.yaml'));
+  } catch (err) { alert(`${f.name} does not load:\n\n${err.message}`); }
+};
+async function save(overwrite) {
+  const path = $('save-path').value.trim();
+  if (!path) { $('save-path').focus(); return; }
+  try {
+    const r = await api('/api/save', { path, config: outgoing(), header: HEADER, overwrite: !!overwrite });
+    dirty = false; $('dirty').textContent = ''; toast(`Saved ${r.saved}`); updateCmd(); refreshInfo();
+  } catch (e) {
+    if (e.status === 409 && confirm(`${path} exists. Overwrite it?`)) return save(true);
+    if (e.status !== 409) alert('Not saved:\n\n' + e.message);
+  }
+}
+$('b-save').onclick = () => save();
+$('save-path').addEventListener('input', updateCmd);
+$('b-download').onclick = () => {
+  if (!lastYaml) { toast('Nothing valid to download yet'); return; }
+  const a = el('a', { href: URL.createObjectURL(new Blob([lastYaml], { type: 'text/yaml' })),
+    download: ($('save-path').value.split('/').pop() || 'config.yaml') });
+  a.click(); URL.revokeObjectURL(a.href);
+};
+$('b-copy').onclick = async () => {
+  try { await navigator.clipboard.writeText(lastYaml); toast('YAML copied'); } catch (e) { toast('Copy failed'); }
+};
+window.addEventListener('beforeunload', (e) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+
+let toastTimer;
+function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2200); }
+
+async function refreshInfo() {
+  info = await api('/api/info');
+  $('dl-firmware').replaceChildren(...info.firmware.map((f) => el('option', { value: f.path }, f.board)));
+  $('dl-plugins').replaceChildren(el('option', { value: 'energest' }, 'built-in energy estimator'),
+    ...info.plugins.map((p) => el('option', { value: p })));
+  const o = $('b-open');
+  o.replaceChildren(el('option', { value: '' }, 'Open from configs/…'), ...info.configs.map((c) => el('option', { value: c }, c.replace(/^configs\//, ''))));
+  if (!info.runner) {
+    $('banner').style.display = 'block';
+    $('banner').textContent = `${info.runner_path} not found — run make. Until then configs cannot be loaded, checked or saved.`;
+  }
+}
+
+(async function init() {
+  try { await refreshInfo(); }
+  catch (e) {
+    server = false;
+    $('banner').style.display = 'block';
+    $('banner').textContent = 'No editor server: start it with  python3 tools/config-editor.py  and open the address it prints. Loading, checking and saving go through it.';
+    setStatus('bad', 'offline');
+  }
+  load(blank(), '');
+  const start = new URLSearchParams(location.search).get('config');
+  if (start && server) { $('b-open').value = ''; await openPath(start); }
+})();
+</script>
+</body>
+</html>
